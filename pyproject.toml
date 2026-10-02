@@ -1,0 +1,24 @@
+[project]
+name = "ev-engine"
+version = "1.0.0"
+description = "Headless +EV odds scanner: BetsAPI TT Cup (and The Odds API for US leagues) -> devig -> Discord alerts"
+requires-python = ">=3.10"
+dependencies = ["requests>=2.32,<3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "responses>=0.25"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ev_engine"]
+known-local-folder = ["conftest"]

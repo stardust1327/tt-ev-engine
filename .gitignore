@@ -1,0 +1,13 @@
+# secrets
+.env
+
+# runtime state (persisted by the Actions cache, never committed)
+.state/
+
+# python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.ruff_cache/
