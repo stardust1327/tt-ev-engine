@@ -84,8 +84,12 @@ book's price disagrees with the market's fair price, so the engine builds the fa
   (leave-one-out, so a book is never measured against itself). Needs `MIN_CONSENSUS_BOOKS` other books.
 - **auto** *(default)* - sharp when available, otherwise consensus.
 
-BetsAPI's coverage table lists **no Pinnacle odds**, so TT Cup edges are priced against a consensus of the
-books BetsAPI does carry (Bet365, Bwin, Betway, Betfair and others, depending on the match).
+BetsAPI carries **no Pinnacle odds**, and for TT Cup it carries only a few books: in October 2026,
+DraftKings (every match), Bet365 (most) and FonBet (about half). The TT Cup workflow therefore sets
+`MIN_CONSENSUS_BOOKS=2`: each book is priced against the average of the other two (the median of two is their
+mean), so a match is priced when all three have fresh prices. `MIN_CONSENSUS_BOOKS=1` also prices matches with
+only two fresh books, against that one other book: more alerts, but a single stale book is enough to fake an
+edge. The **Book coverage** annotation on each run shows how many books each match had.
 
 **Worked example.** Three books at `1.90 / 1.90` give a 50% / 50% fair line. A fourth book offers `2.10` on
 the home player: `EV = 2.10 × 0.50 − 1 = +5.0%`. The other side at `1.75`: `1.75 × 0.50 − 1 = −12.5%`.
@@ -96,7 +100,7 @@ the home player: `EV = 2.10 × 0.50 − 1 = +5.0%`. The other side at `1.75`: `1
 |---|---|---|
 | Price confirmed within `MAX_ODDS_AGE_MIN` | 10 min | stale prices make phantom edges |
 | Reference margin between 1.00 and `MAX_OVERROUND` | 1.12 | junk margins make a junk fair line |
-| At least `MIN_CONSENSUS_BOOKS` other books (unless a sharp book is present) | 3 | thin markets are noise |
+| At least `MIN_CONSENSUS_BOOKS` other books (unless a sharp book is present) | 3 (TT Cup: 2) | thin markets are noise |
 | `EV ≤ MAX_EV` | 15% | bigger "edges" are almost always reversed or mismatched data |
 | Price between `MIN_ODDS` and `MAX_ODDS` | 1.10-5.00 | devig error grows on longshots |
 | Match starts in at least `MIN_MINUTES_TO_START` | 2 min | no time to bet |
@@ -182,7 +186,7 @@ TT Cup.
 | `DEVIG_METHOD` | `power` | `multiplicative`, `additive`, `power`, `shin` |
 | `FAIR_LINE_MODE` | `auto` | `auto`, `sharp`, `consensus` |
 | `SHARP_BOOKS` | *(empty)* | priority list of sharp books, e.g. `pinnacle` |
-| `MIN_CONSENSUS_BOOKS` | `3` | other books needed for a consensus line (2 = more alerts, more noise) |
+| `MIN_CONSENSUS_BOOKS` | `3` (TT Cup workflow: `2`) | other books needed for a consensus line (lower = more alerts, more noise) |
 | `MAX_OVERROUND` | `1.12` | books with a larger margin stay out of the fair line |
 | `MIN_ODDS` / `MAX_ODDS` | `1.10` / `5.00` | only alert prices in this range |
 | `MAX_ODDS_AGE_MIN` | `10` | ignore prices not confirmed this recently |

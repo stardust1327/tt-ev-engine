@@ -103,7 +103,10 @@ jobs:
           DEVIG_METHOD: ${{ vars.DEVIG_METHOD }}
           FAIR_LINE_MODE: ${{ vars.FAIR_LINE_MODE }}
           SHARP_BOOKS: ${{ vars.SHARP_BOOKS }}
-          MIN_CONSENSUS_BOOKS: ${{ vars.MIN_CONSENSUS_BOOKS }}
+          # BetsAPI carries ~3 books for TT Cup (DraftKings, Bet365, FonBet), so the engine-wide
+          # default of 3 OTHER books can never be met here. 2 = price each book against the
+          # average of the other two. 1 = more alerts, but one stale book can fake an edge.
+          MIN_CONSENSUS_BOOKS: ${{ vars.MIN_CONSENSUS_BOOKS || '2' }}
           MAX_OVERROUND: ${{ vars.MAX_OVERROUND }}
           MIN_ODDS: ${{ vars.MIN_ODDS }}
           MAX_ODDS: ${{ vars.MAX_ODDS }}
