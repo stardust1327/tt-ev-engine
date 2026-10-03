@@ -270,7 +270,7 @@ def coverage_summary(report: RunReport, settings: Settings, *, max_books: int = 
     lines = sum(report.books_quoting.values())
     ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
     books = ", ".join(
-        f"{book} {quoted}/{report.book_usable[book]}{_age_note(report.median_age(book))}"
+        f"{book} {quoted}/{report.book_usable[book]}{_book_note(report, book)}"
         for book, quoted in ranked[:max_books]
     )
     if len(ranked) > max_books:
@@ -278,7 +278,7 @@ def coverage_summary(report: RunReport, settings: Settings, *, max_books: int = 
     return (
         f"{lines} market line(s). Books quoting each: {_depth(report.books_quoting)}. "
         f"Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}. "
-        f"By book (lines quoted/usable, median price age): {books}. {_fair_line_needs(settings)}."
+        f"By book (lines quoted/usable, median age since last check): {books}. {_fair_line_needs(settings)}."
     )
 
 
@@ -286,8 +286,13 @@ def _age(minutes: float) -> str:
     return f"{minutes:.0f}m" if minutes < 120 else f"{minutes / 60:.1f}h"
 
 
-def _age_note(minutes: float | None) -> str:
-    return "" if minutes is None else f" ({_age(minutes)})"
+def _book_note(report: RunReport, book: str) -> str:
+    notes = []
+    if (age := report.median_age(book)) is not None:
+        notes.append(_age(age))
+    if report.book_unmoved[book]:
+        notes.append(f"{report.book_unmoved[book]} still at opening price")
+    return f" ({'; '.join(notes)})" if notes else ""
 
 
 def _log_summary(report: RunReport, settings: Settings) -> None:
@@ -346,11 +351,13 @@ def write_step_summary(report: RunReport, settings: Settings, path: str | None =
                   f"- Books quoting each market line: {_depth(report.books_quoting)}",
                   f"- Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}",
                   f"- {_fair_line_needs(settings)}",
-                  "", "| Book | Lines quoted | Usable for the fair line | Median price age |", "|---|---|---|---|"]
+                  "",
+                  "| Book | Lines quoted | Usable for fair line | Median age since check | At opening price |",
+                  "|---|---|---|---|---|"]
         ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
         lines += [
             f"| {_cell(book)} | {quoted} | {report.book_usable[book]} | "
-            f"{_age(age) if (age := report.median_age(book)) is not None else '-'} |"
+            f"{_age(age) if (age := report.median_age(book)) is not None else '-'} | {report.book_unmoved[book]} |"
             for book, quoted in ranked[:40]
         ]
     if report.skip_counts:

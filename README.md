@@ -51,7 +51,7 @@ ev_engine/
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               138 tests, all HTTP mocked (pytest + responses)
+tests/               139 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -275,7 +275,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 138 tests, no network needed
+pytest                            # 139 tests, no network needed
 ```
 
 ---

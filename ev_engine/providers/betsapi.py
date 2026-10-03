@@ -91,6 +91,16 @@ def _ago(ts: int, now: datetime) -> str:
     return f"{minutes:.0f}m ago" if minutes < 120 else f"{minutes / 60:.1f}h ago"
 
 
+def _price_key(record: dict) -> tuple:
+    """A record's prices and line, comparable across '1.9' / '1.900' formatting."""
+    def norm(value: Any) -> Any:
+        try:
+            return round(float(value), 4)
+        except (TypeError, ValueError):
+            return value
+    return tuple(norm(record.get(f)) for f in ("home_od", "away_od", "over_od", "under_od", "handicap"))
+
+
 def _name(obj: Any) -> str | None:
     return str(obj["name"]).strip() if isinstance(obj, dict) and obj.get("name") else None
 
@@ -344,6 +354,11 @@ class BetsApiTableTennisProvider(OddsProvider):
                     self.report.skip("split_line", f"{where}: split line {record.get('handicap')!r} ignored")
                     continue
                 markets.append(bm)
+                # Diagnostics: a book whose prices never move off the opener while others do is suspect.
+                opening = snapshots.get("start")
+                opening = opening.get(key) if isinstance(opening, dict) else None
+                if isinstance(opening, dict) and _price_key(opening) == _price_key(record):
+                    self.report.book_unmoved[str(book)] += 1
         return markets
 
     @staticmethod

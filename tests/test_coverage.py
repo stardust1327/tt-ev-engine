@@ -45,7 +45,7 @@ def test_coverage_summary_text(settings):
     text = coverage_summary(report, settings)
     assert text.startswith("4 market line(s). Books quoting each: 1 book ×2, 2 books ×2.")
     assert "Usable for the fair line (fresh, sane margin): 0 books ×1, 1 book ×3." in text
-    assert "By book (lines quoted/usable, median price age): Bet365 3/3 (1m), 1XBet 2/0 (1m), " \
+    assert "By book (lines quoted/usable, median age since last check): Bet365 3/3 (1m), 1XBet 2/0 (1m), " \
            "DraftKings 1/0 (2.5h)." in text
     assert text.endswith("A consensus needs 3 books besides the one being bet (MIN_CONSENSUS_BOOKS).")
 
@@ -78,7 +78,7 @@ def test_step_summary_lists_books(settings, tmp_path):
     write_step_summary(report, settings, path=str(path))
     text = path.read_text()
     assert "**Book coverage**" in text
-    assert "| Bet365 | 1 | 1 | 1m |" in text and "| 1XBet | 1 | 0 | 1m |" in text
+    assert "| Bet365 | 1 | 1 | 1m | 0 |" in text and "| 1XBet | 1 | 0 | 1m | 0 |" in text
 
 
 @responses.activate
@@ -86,7 +86,7 @@ def test_run_emits_a_book_coverage_notice(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     responses.add(responses.GET, f"{BETSAPI}/v3/events/upcoming", json=upcoming(fixture("e1", 25)))
     responses.add(responses.GET, f"{BETSAPI}/v2/event/odds/summary",
-                  json=summary(Bet365=book_odds("1.9", "1.9"), BWin=book_odds("1.87", "1.93")))
+                  json=summary(Bet365=book_odds("1.92", "1.88"), BWin=book_odds("1.87", "1.93")))
     assert run(make_settings(tmp_path, dry_run=True), now=NOW, sleep=lambda _s: None) == 0
     out = capsys.readouterr().out
     coverage = [line for line in out.splitlines() if line.startswith("::notice title=Book coverage::")]
@@ -94,3 +94,16 @@ def test_run_emits_a_book_coverage_notice(monkeypatch, capsys, tmp_path):
     assert "Books quoting each: 2 books ×1" in coverage[0]
     assert "BWin 1/1 (1m)" in coverage[0] and "Bet365 1/1 (1m)" in coverage[0]
     assert "tok_live" not in out
+
+
+@responses.activate
+def test_betsapi_counts_books_still_at_their_opening_price(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    responses.add(responses.GET, f"{BETSAPI}/v3/events/upcoming", json=upcoming(fixture("e1", 25)))
+    responses.add(responses.GET, f"{BETSAPI}/v2/event/odds/summary", json=summary(
+        Bet365=book_odds("1.9", "1.9"),        # same as its 1.900/1.900 opener
+        FonBet=book_odds("1.95", "1.85")))     # moved
+    assert run(make_settings(tmp_path, dry_run=True), now=NOW, sleep=lambda _s: None) == 0
+    coverage = [line for line in capsys.readouterr().out.splitlines() if "title=Book coverage" in line][0]
+    assert "Bet365 1/1 (1m; 1 still at opening price)" in coverage
+    assert "FonBet 1/1 (1m)" in coverage

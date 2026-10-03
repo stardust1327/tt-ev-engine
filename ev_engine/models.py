@@ -168,6 +168,7 @@ class RunReport:
     book_quotes: Counter = field(default_factory=Counter)    # bookmaker -> lines it quoted
     book_usable: Counter = field(default_factory=Counter)    # bookmaker -> lines where it could inform the fair line
     book_ages: dict[str, list[float]] = field(default_factory=dict)  # bookmaker -> minutes since each confirmation
+    book_unmoved: Counter = field(default_factory=Counter)   # bookmaker -> lines still at the opening price
 
     MAX_SKIP_DETAILS = 300  # keep memory bounded; counts stay exact
 
