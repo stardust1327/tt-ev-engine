@@ -63,6 +63,23 @@ def _num(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def describe_key(key: str) -> str:
+    """The shape of an API key for error messages - its length and paste slips, never its value."""
+    lowered = key.lower()
+    issues = []
+    if any(ch.isspace() for ch in key):
+        issues.append("contains spaces or line breaks")
+    if any(ch in "\"'`" for ch in key):
+        issues.append("contains quote marks")
+    if "apikey" in lowered or "=" in key:
+        issues.append("contains 'apiKey=' - save only the value after it")
+    if "http" in lowered or "/" in key:
+        issues.append("looks like part of a URL - save only the key")
+    if not issues and not key.isalnum():
+        issues.append("has characters other than letters and digits")
+    return f"{len(key)} characters" + ("; " + "; ".join(issues) if issues else ", letters and digits only")
+
+
 class TheOddsApiProvider(OddsProvider):
     name = "the_odds_api"
     label = "The Odds API"
@@ -109,6 +126,10 @@ class TheOddsApiProvider(OddsProvider):
                 self.report.skip("rate_limit", str(exc))
                 break
             except ApiError as exc:
+                if exc.status == 401 and s.the_odds_api_key and "KEY" in str(exc):
+                    # Say what the saved key looks like (never its value) - most 401s are paste slips.
+                    raise ApiError(f"{exc} [saved THE_ODDS_API_KEY: {describe_key(s.the_odds_api_key)}]",
+                                   status=401, fatal=True) from None
                 if exc.fatal:
                     raise
                 # e.g. HTTP 404/422 for a sport key that doesn't exist: surface it, keep going.
