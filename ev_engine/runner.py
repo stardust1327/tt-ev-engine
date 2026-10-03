@@ -283,6 +283,7 @@ def coverage_summary(report: RunReport, settings: Settings, *, max_books: int = 
 
 
 def _age(minutes: float) -> str:
+    minutes = max(0.0, minutes)  # a provider clock a little ahead of ours is not "in the future" for a reader
     return f"{minutes:.0f}m" if minutes < 120 else f"{minutes / 60:.1f}h"
 
 

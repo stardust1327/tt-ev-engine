@@ -91,6 +91,13 @@ mean), so a match is priced when all three have fresh prices. `MIN_CONSENSUS_BOO
 only two fresh books, against that one other book: more alerts, but a single stale book is enough to fake an
 edge. The **Book coverage** annotation on each run shows how many books each match had.
 
+Two things about this feed shape what you'll see. BetsAPI re-checks DraftKings' TT prices far less often than
+Bet365's or FonBet's (gaps of 17+ minutes in testing), so DraftKings drops out of the 10-minute freshness window
+between checks and TT alerts tend to come in bursts after each refresh. Raising `MAX_ODDS_AGE_MIN` to 30 gives
+more alerts on older prices. And with no sharp book in the mix, an "edge" means one book disagrees with the
+other two, which can be the slow book (a real edge) or the one that just moved on news (not one). Check the
+price at the book before betting, and track closing-line value.
+
 **Worked example.** Three books at `1.90 / 1.90` give a 50% / 50% fair line. A fourth book offers `2.10` on
 the home player: `EV = 2.10 × 0.50 − 1 = +5.0%`. The other side at `1.75`: `1.75 × 0.50 − 1 = −12.5%`.
 
