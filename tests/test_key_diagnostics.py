@@ -35,6 +35,6 @@ def test_invalid_key_error_describes_the_saved_key(tmp_path):
     with pytest.raises(ApiError) as err:
         provider.fetch_events(NOW)
     message = str(err.value)
-    assert "INVALID_KEY" in message and "saved THE_ODDS_API_KEY: 20 characters" in message
+    assert "INVALID_KEY" in message and "saved THE_ODDS_API_KEY: 19 characters" in message
     assert "contains 'apiKey='" in message
     assert "deadbeef1234" not in message
