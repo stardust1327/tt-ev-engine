@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
@@ -182,8 +183,52 @@ def _annotate(report: RunReport, settings: Settings) -> None:
         parts.append("skipped: " + ", ".join(
             f"{n}x {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common(4)))
     emit_annotation("notice", "EV scan", " | ".join(parts), settings.secrets())
+    coverage = coverage_summary(report, settings)
+    if coverage:
+        emit_annotation("notice", "Book coverage", coverage, settings.secrets())
     for error in report.errors[:8]:
         emit_annotation("error", "EV scan error", error, settings.secrets())
+
+
+def _books(n: int) -> str:
+    return f"{n} book" if n == 1 else f"{n} books"
+
+
+def _depth(counter: Counter) -> str:
+    """{2: 9, 3: 4} -> '2 books ×9, 3 books ×4'."""
+    return ", ".join(f"{_books(n)} ×{lines}" for n, lines in sorted(counter.items()))
+
+
+def _fair_line_needs(settings: Settings) -> str:
+    sharp = ", ".join(settings.sharp_books)
+    if settings.fair_line_mode == "sharp":
+        return f"Sharp mode needs a fresh price from {sharp or 'SHARP_BOOKS (empty!)'}"
+    needs = f"A consensus needs {_books(settings.min_consensus_books)} besides the one being bet (MIN_CONSENSUS_BOOKS)"
+    if sharp and settings.fair_line_mode == "auto":
+        needs += f", or a fresh price from {sharp}"
+    return needs
+
+
+def coverage_summary(report: RunReport, settings: Settings, *, max_books: int = 12) -> str | None:
+    """Book depth in one line: how many books priced each market line, and which books they were.
+
+    This is what decides whether a fair line can be built at all, so it is the first thing
+    to look at when every market is skipped with "No fair line (too few books)".
+    """
+    if not report.books_quoting:
+        return None
+    lines = sum(report.books_quoting.values())
+    ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    books = ", ".join(f"{book} {quoted}/{report.book_usable[book]}" for book, quoted in ranked[:max_books])
+    if len(ranked) > max_books:
+        books += f", +{len(ranked) - max_books} more"
+    return (
+        f"{lines} market line(s). Books quoting each: {_depth(report.books_quoting)}. "
+        f"Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}. "
+        f"By book (lines quoted/usable): {books}. {_fair_line_needs(settings)}."
+    )
+
+
 def _log_summary(report: RunReport, settings: Settings) -> None:
     log.info(
         "Done: %d event(s), %d book-market(s) evaluated, %d +EV edge(s) -> %d alert(s) %s, "
@@ -195,6 +240,9 @@ def _log_summary(report: RunReport, settings: Settings) -> None:
         log.info("Skipped: %s", "; ".join(f"{n}x {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common()))
     for provider, usage in report.api_usage.items():
         log.info("API usage - %s: %s", provider, usage)
+    coverage = coverage_summary(report, settings)
+    if coverage:
+        log.info("Book coverage: %s", coverage)
     for error in report.errors:
         log.error("Run error: %s", error)
 
@@ -232,6 +280,14 @@ def write_step_summary(report: RunReport, settings: Settings, path: str | None =
                 f"| {e.ev:+.1%} | {_cell(e.selection)} | {_cell(e.bookmaker)} | {e.price:.2f} | "
                 f"{e.fair_odds:.2f} | {_cell(e.event.matchup)} | {e.event.start_time:%H:%M} |"
             )
+    if report.books_quoting:
+        lines += ["", "**Book coverage**", "",
+                  f"- Books quoting each market line: {_depth(report.books_quoting)}",
+                  f"- Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}",
+                  f"- {_fair_line_needs(settings)}",
+                  "", "| Book | Lines quoted | Usable for the fair line |", "|---|---|---|"]
+        ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+        lines += [f"| {_cell(book)} | {quoted} | {report.book_usable[book]} |" for book, quoted in ranked[:40]]
     if report.skip_counts:
         lines += ["", "**Skipped**", ""]
         lines += [f"- {n}× {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common()]

@@ -29,7 +29,7 @@ def test_run_emits_a_notice_with_the_result(monkeypatch, capsys, tmp_path):
         Betway=book_odds("1.93", "1.87"), Unibet=book_odds("1.70", "2.25")))
     responses.add(responses.POST, WEBHOOK, status=204)
     assert run(make_settings(tmp_path), now=NOW, sleep=lambda _s: None) == 0
-    notice = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice")]
+    notice = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice title=EV scan::")]
     assert len(notice) == 1
     assert "1 events scanned%2C" not in notice[0]  # commas are only escaped in the title
     assert "1 events scanned, 1 +EV edges, 1 alerts posted" in notice[0]

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -161,6 +162,11 @@ class RunReport:
     skip_counts: Counter = field(default_factory=Counter)
     errors: list[str] = field(default_factory=list)
     api_usage: dict[str, str] = field(default_factory=dict)
+    # Book depth per market line - answers "is there enough market to build a fair line?"
+    books_quoting: Counter = field(default_factory=Counter)  # n books quoting a line -> number of lines
+    books_usable: Counter = field(default_factory=Counter)   # n fresh, sane-margin books -> number of lines
+    book_quotes: Counter = field(default_factory=Counter)    # bookmaker -> lines it quoted
+    book_usable: Counter = field(default_factory=Counter)    # bookmaker -> lines where it could inform the fair line
 
     MAX_SKIP_DETAILS = 300  # keep memory bounded; counts stay exact
 
@@ -170,3 +176,11 @@ class RunReport:
         if len(self.skips) < self.MAX_SKIP_DETAILS:
             self.skips.append(Skip(category, detail))
         log.debug("skip [%s] %s", category, detail)
+
+    def record_coverage(self, quoting: Iterable[str], usable: Iterable[str]) -> None:
+        """Note which books priced one market line, and which of them were fit for the fair line."""
+        quoting, usable = set(quoting), set(usable)
+        self.books_quoting[len(quoting)] += 1
+        self.books_usable[len(usable)] += 1
+        self.book_quotes.update(quoting)
+        self.book_usable.update(usable)

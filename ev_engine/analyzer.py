@@ -125,6 +125,7 @@ def _scan_market(
             continue
         references.append(bm)
         no_vig[id(bm)] = {o.name: p for o, p in zip(bm.outcomes, probs, strict=True)}
+    report.record_coverage((bm.bookmaker for bm in books), (bm.bookmaker for bm in references))
 
     # 2-3) Fair line per target (leave-one-out) and EV for each of its outcomes.
     candidates: dict[str, list[tuple[float, float, BookMarket, float, str]]] = defaultdict(list)
