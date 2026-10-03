@@ -18,6 +18,7 @@ price edges against the sharpest line instead of a soft-book consensus.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import time
@@ -77,7 +78,10 @@ def describe_key(key: str) -> str:
         issues.append("looks like part of a URL - save only the key")
     if not issues and not key.isalnum():
         issues.append("has characters other than letters and digits")
-    return f"{len(key)} characters" + ("; " + "; ".join(issues) if issues else ", letters and digits only")
+    # A short one-way hash: shows whether the saved value changed between runs, reveals nothing usable.
+    fingerprint = hashlib.sha256(key.encode()).hexdigest()[:8]
+    shape = f"{len(key)} characters" + ("; " + "; ".join(issues) if issues else ", letters and digits only")
+    return f"{shape}; fingerprint {fingerprint}"
 
 
 class TheOddsApiProvider(OddsProvider):
