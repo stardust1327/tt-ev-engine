@@ -4,8 +4,8 @@ A headless Python engine that pulls upcoming **TT Cup** table-tennis odds from *
 bookmaker margin to estimate each player's true win probability, flags prices with positive expected value,
 and posts them to **Discord** as rich embeds. It runs every 15 minutes on **GitHub Actions** with no server.
 
-The odds sources are plug-ins: an adapter for **The Odds API** (MLB, NFL and other US leagues) ships in the box,
-switched off until you add a key.
+**MLB and NFL** run through **The Odds API** in a second workflow (every 30 minutes, priced against Pinnacle),
+with an optional Discord channel of their own.
 
 ```
 🔥 +5.2% EV · Kovalenko M. vs Shevchenko O.
@@ -20,21 +20,24 @@ Fair line from: Consensus of 3 books (median, power devig)
 
 ```mermaid
 flowchart LR
-  cron["GitHub Actions<br/>cron, every 15 min"] --> cli["python -m ev_engine"]
+  cron1["TT Cup workflow<br/>every 15 min"] --> cli["python -m ev_engine"]
+  cron2["MLB-NFL workflow<br/>every 30 min"] --> cli
   cache[("Actions cache<br/>alert state")] <--> cli
   cli --> p1["BetsAPI provider<br/>TT Cup"]
-  cli -.-> p2["The Odds API provider<br/>MLB / NFL (opt-in)"]
+  cli --> p2["The Odds API provider<br/>MLB / NFL"]
   p1 --> norm["Normalized events<br/>Event → BookMarket → Outcome"]
-  p2 -.-> norm
+  p2 --> norm
   norm --> an["Analyzer<br/>quality gates → fair line → EV"]
   an --> dd{"New pick?"}
   dd -- yes --> dc["Discord webhook<br/>rich embeds"]
   dd -- "no (already alerted)" --> skip["suppressed"]
-  an --> sum["Job summary<br/>edges · skips · API usage"]
+  an --> sum["Run summary + annotations<br/>edges · skips · API usage"]
 ```
 
 ```
-.github/workflows/ev-scanner.yml   schedule, secrets → env, alert-state cache
+.github/workflows/
+  ev-scanner.yml         TT Cup: schedule, secrets → env, alert-state cache
+  us-sports-scanner.yml  MLB / NFL: same engine, its own schedule, cache and webhook
 ev_engine/
   config.py          every setting is an env var; secrets only via os.getenv
   models.py          provider-agnostic data model
@@ -48,7 +51,7 @@ ev_engine/
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               107 tests, all HTTP mocked (pytest + responses)
+tests/               113 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -120,7 +123,8 @@ Repository → **Settings → Secrets and variables → Actions → Secrets → 
 |---|---|
 | `BETSAPI_TOKEN` | your BetsAPI token (needs a package that includes the table-tennis Events API) |
 | `DISCORD_WEBHOOK_URL` | the URL from step 2 |
-| `THE_ODDS_API_KEY` | *(optional, for MLB/NFL later)* |
+| `THE_ODDS_API_KEY` | for the MLB/NFL workflow |
+| `DISCORD_WEBHOOK_URL_US` | *(optional)* a second webhook so MLB/NFL alerts get their own channel |
 
 Or with the GitHub CLI, which prompts for the value so it stays out of your shell history:
 
@@ -139,13 +143,16 @@ Same page → **Variables** tab → **New repository variable**, e.g. `EV_THRESH
 Any variable you don't set falls back to the defaults in `ev_engine/config.py`.
 
 ### 5. Test it
-**Actions** tab → enable workflows if asked → **EV Scanner** → **Run workflow**:
+**Actions** tab → enable workflows if asked → **TT Cup EV Scanner** (or **MLB-NFL EV Scanner**) → **Run workflow**:
 
 1. Tick **Only post one sample alert** and untick **Dry run** → a 🧪 TEST embed should land in Discord.
 2. Run again with **Dry run** ticked → the job log shows exactly what would be posted, and the run page shows a
    summary of events scanned, edges, skip reasons and API usage.
 
-After that the schedule takes over: scheduled runs always post for real.
+After that the schedule takes over: scheduled runs always post for real. Every run also leaves a one-line
+**EV scan** annotation on its run page (events, edges, alerts, API calls and credits left), and any error shows
+there too, so you rarely need to open the logs. While a workflow's secrets are missing it doesn't fail: it
+finishes green with a **Scanner idle** warning naming the missing secret.
 
 ### 6. Pin the league (recommended)
 The first runs log a line like `matched leagues TT Cup [22742]. Tip: set BETSAPI_LEAGUE_IDS=22742`.
@@ -156,10 +163,14 @@ Setting that variable skips the sport-wide fixture scan and saves API calls.
 ## Configuration
 
 Every setting is an environment variable (a repository variable in Actions, or a line in `.env` locally).
+Each workflow pins its own source (`ENABLED_PROVIDERS`), so the TT Cup and MLB/NFL scanners never interfere.
+The MLB/NFL workflow reads `US_`-prefixed variables for its tunables (`US_BET_BOOKS`, `US_EV_THRESHOLD`,
+`US_MIN_ODDS`, `US_MAX_ODDS`, `US_SHARP_BOOKS`, `US_MAX_ALERTS_PER_RUN`), so you can tune it without touching
+TT Cup.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ENABLED_PROVIDERS` | `betsapi_tt` | comma list: `betsapi_tt`, `the_odds_api` |
+| `ENABLED_PROVIDERS` | `betsapi_tt` | set by each workflow: `betsapi_tt` or `the_odds_api` |
 | `EV_THRESHOLD` | `0.02` | minimum EV to alert (0.02 = 2%) |
 | `STRONG_EV_THRESHOLD` | `0.05` | darker green + 🔥 at or above this |
 | `MAX_EV` | `0.15` | EV above this is treated as bad data |
@@ -183,7 +194,7 @@ Every setting is an environment variable (a repository variable in Actions, or a
 | `BETSAPI_BASE_URL` | `https://api.b365api.com` | BetsAPI's backup endpoint is `https://api.betsapi.com` |
 | `ODDS_API_SPORTS` | `baseball_mlb,americanfootball_nfl` | The Odds API sport keys |
 | `ODDS_API_REGIONS` / `ODDS_API_MARKETS` | `us,eu` / `h2h` | each region × market costs a credit per call |
-| `ODDS_API_LOOKAHEAD_MIN` / `ODDS_API_MIN_REMAINING` | `1440` / `50` | window and monthly-credit floor |
+| `ODDS_API_LOOKAHEAD_MIN` / `ODDS_API_MIN_REMAINING` | `1440` (workflow: `4320`) / `50` | window and monthly-credit floor |
 | `DRY_RUN` / `LOG_LEVEL` | `false` / `INFO` | |
 
 Handicap and total markets (`92_2`, `92_3`) are off by default: books mix set and point handicaps, and lines
@@ -196,37 +207,46 @@ only match across books when the number is identical.
 - **BetsAPI**: 3,600 requests per hour by default. A run makes one call per fixture page plus one per match
   (about 10-70). The client reads `X-RateLimit-Remaining`, stops at `BETSAPI_MIN_REMAINING`, never exceeds
   `BETSAPI_MAX_CALLS`, honours `Retry-After` on HTTP 429, and treats `TOO_MANY_REQUESTS` as "stop for this run".
-- **The Odds API**: each call costs *markets × regions* credits. The defaults (h2h × us,eu) cost 2 credits per
-  sport per run, about 11,500 credits a month for two sports every 15 minutes. To spend less, use one region or
-  run US sports from a second, slower workflow (copy the YAML, set `ENABLED_PROVIDERS: the_odds_api` and a
-  different cron).
+- **The Odds API**: each call costs *markets × regions* credits per sport, whatever the number of games. The
+  MLB-NFL workflow's defaults (h2h × us,eu, two sports, every 30 minutes) cost 4 credits a run, about 5,800 a
+  month; a sport with no games listed costs nothing. That needs a paid plan (the free tier is 500 credits a
+  month). Running every 15 minutes doubles it; adding spreads and totals triples it. The engine stops calling
+  when credits left reach `ODDS_API_MIN_REMAINING`.
 - **Discord**: on HTTP 429 the notifier waits `retry_after` and retries; when the bucket is empty it waits
   `X-RateLimit-Reset-After`; up to 10 embeds and 6,000 characters per message; a 404 (deleted webhook) stops
   delivery and fails the run.
 - **GitHub Actions minutes**: free for public repositories. A private repository on GitHub Free includes 2,000
-  minutes a month, and every run bills at least one minute, so 96 runs a day (about 2,900 a month) goes over.
-  Make the repo public (secrets stay encrypted), switch the cron to every 20-30 minutes, or pay for the overage.
+  minutes a month, and every run bills at least one minute, so the two schedules (about 4,300 runs a month)
+  go well over. Keep the repo public (secrets stay encrypted), slow the crons, or pay for the overage.
 - **Schedule caveats**: scheduled runs can start late or be dropped when GitHub is busy, especially at the top of
   the hour, which is why the cron uses `:07 :22 :37 :52`. TT Cup matches are short and prices move fast; if the
   delays cost you edges, run the same `python -m ev_engine` from an always-on box with `cron`. In public
   repositories GitHub disables scheduled workflows after 60 days without repository activity; re-enable from the
   Actions tab.
 
-**De-duplication.** Each runner is a fresh machine, so the workflow restores `.state/alert_state.json` from
-the Actions cache before the scan and saves it afterwards. A pick alerts once, and again only if its EV improves
-by `REALERT_EV_DELTA`. Picks that failed to send are not remembered, so they retry next run.
+**De-duplication.** Each runner is a fresh machine, so each workflow restores its alert state from the Actions
+cache before the scan and saves it afterwards (TT Cup and MLB/NFL keep separate state). A pick alerts once, and
+again only if its EV improves by `REALERT_EV_DELTA`. Picks that failed to send are not remembered, so they
+retry next run.
 
 **Exit codes.** `0` ok (including "no edges"), `1` a provider or Discord failed (the run turns red and GitHub
 emails you), `2` configuration error.
 
 ---
 
-## Adding MLB / NFL
+## MLB / NFL
 
-1. Add the `THE_ODDS_API_KEY` secret.
-2. Set variables: `ENABLED_PROVIDERS = betsapi_tt,the_odds_api`, `SHARP_BOOKS = pinnacle`
-   (Pinnacle is in the `eu` region), and `BET_BOOKS` to the US books you use, e.g. `draftkings,fanduel`.
-3. Optional: `ODDS_API_MARKETS = h2h,spreads,totals` (costs more credits).
+`.github/workflows/us-sports-scanner.yml` runs the same engine against The Odds API every 30 minutes
+(`:12` and `:42`), looking up to 3 days ahead so NFL games show up from midweek.
+
+1. Add the `THE_ODDS_API_KEY` secret (and `DISCORD_WEBHOOK_URL_US` for a separate channel).
+2. Optional variables: `US_BET_BOOKS` = the US books you can bet at (e.g. `draftkings,fanduel`),
+   `US_EV_THRESHOLD`, `ODDS_API_MARKETS = h2h,spreads,totals` (3× the credits).
+3. Run **MLB-NFL EV Scanner** with **Dry run** ticked to see the first scan.
+
+The fair line is Pinnacle's no-vig price whenever Pinnacle lists the game (The Odds API's `eu` region;
+`US_SHARP_BOOKS` changes this), otherwise a consensus of the other books. To change the cadence, edit the cron at
+the top of the workflow file.
 
 **Another data source**: subclass `OddsProvider` in `ev_engine/providers/`, return normalized `Event`s, and add
 the class to `REGISTRY` in `providers/__init__.py`. The analyzer, notifier and state need no changes.
@@ -245,7 +265,7 @@ pip install -r requirements-dev.txt
 cp .env.example .env              # fill in your token + webhook; .env is git-ignored
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
-pytest                            # 107 tests, no network needed
+pytest                            # 113 tests, no network needed
 ```
 
 ---

@@ -48,6 +48,7 @@ def run(
         providers = build_providers(settings, report, session=session, sleep=sleep)
     except ConfigError as exc:
         log.error("Configuration error: %s", exc)
+        emit_annotation("error", "Configuration error", str(exc), settings.secrets())
         return 2
 
     state = AlertState.load(settings.state_path, ttl_hours=settings.state_ttl_hours,
@@ -113,6 +114,7 @@ def run(
 
     _log_summary(report, settings)
     write_step_summary(report, settings, path=summary_path)
+    _annotate(report, settings)
     return 1 if report.errors else 0
 
 
@@ -125,26 +127,63 @@ def send_test_alert(
 ) -> int:
     """Post one clearly-labelled sample embed to check the webhook and the formatting."""
     now = now or datetime.now(timezone.utc)
-    event = Event(provider="test", source="Test alert", event_id="sample", sport="Table Tennis",
-                  league="TT Cup (sample)", home="Player A", away="Player B",
+    table_tennis = "betsapi_tt" in settings.providers
+    event = Event(provider="test", source="Test alert", event_id="sample",
+                  sport="Table Tennis" if table_tennis else "MLB / NFL",
+                  league="TT Cup (sample)" if table_tennis else "MLB / NFL (sample)",
+                  home="Player A" if table_tennis else "Home Team",
+                  away="Player B" if table_tennis else "Away Team",
                   start_time=now + timedelta(minutes=30))
-    edge = Edge(event=event, market=MONEYLINE, line=None, outcome="Player A", bookmaker="Sample Book",
+    edge = Edge(event=event, market=MONEYLINE, line=None, outcome=event.home, bookmaker="Sample Book",
                 price=2.10, fair_prob=0.495, ev=2.10 * 0.495 - 1,
                 reference="Consensus of 4 books (median, power devig) - sample data", updated_at=now,
                 alternatives=(("Other Book", 2.08, 2.08 * 0.495 - 1),))
     try:
-        result = DiscordNotifier.from_settings(settings, session=session, sleep=sleep).send([edge], now, test=True)
+        error = DiscordNotifier.from_settings(settings, session=session, sleep=sleep).send([edge], now, test=True).error
     except DiscordError as exc:
-        log.error("Test alert failed: %s", exc)
+        error = str(exc)
+    if error:
+        log.error("Test alert failed: %s", error)
+        emit_annotation("error", "Test alert failed", error, settings.secrets())
         return 1
-    if result.error:
-        log.error("Test alert failed: %s", result.error)
-        return 1
-    log.info("Test alert %s.", "logged (dry run)" if settings.dry_run else "posted to Discord")
+    outcome = "logged (dry run)" if settings.dry_run else "posted to Discord"
+    log.info("Test alert %s.", outcome)
+    emit_annotation("notice", "Test alert", f"Sample alert {outcome}.", settings.secrets())
     return 0
 
 
 # -- reporting ------------------------------------------------------------------------
+def _escape_command(text: str, *, prop: bool = False) -> str:
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    return text.replace(":", "%3A").replace(",", "%2C") if prop else text
+
+
+def emit_annotation(level: str, title: str, message: str, secrets: tuple[str, ...] = ()) -> None:
+    """Print a GitHub Actions workflow command, which shows as an annotation on the run page.
+
+    Annotations are visible in the Actions UI (and API) without opening the logs, so each
+    run's outcome - or the exact reason it failed - is one glance away. No-op outside Actions.
+    """
+    if os.getenv("GITHUB_ACTIONS") != "true":
+        return
+    for secret in sorted(set(secrets), key=len, reverse=True):
+        message = message.replace(secret, "***")
+    print(f"::{level} title={_escape_command(title, prop=True)}::{_escape_command(message)}", flush=True)
+
+
+def _annotate(report: RunReport, settings: Settings) -> None:
+    mode = "logged (dry run)" if settings.dry_run else "posted"
+    parts = [f"{report.events_scanned} events scanned, {len(report.edges)} +EV edges, "
+             f"{report.alerts_sent} alerts {mode}"]
+    if report.suppressed:
+        parts.append(f"{report.suppressed} already alerted")
+    parts += [f"{provider} {usage}" for provider, usage in report.api_usage.items()]
+    if report.skip_counts:
+        parts.append("skipped: " + ", ".join(
+            f"{n}x {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common(4)))
+    emit_annotation("notice", "EV scan", " | ".join(parts), settings.secrets())
+    for error in report.errors[:8]:
+        emit_annotation("error", "EV scan error", error, settings.secrets())
 def _log_summary(report: RunReport, settings: Settings) -> None:
     log.info(
         "Done: %d event(s), %d book-market(s) evaluated, %d +EV edge(s) -> %d alert(s) %s, "

@@ -1,0 +1,115 @@
+# MLB / NFL scanner (The Odds API) - every 30 minutes on a GitHub-hosted runner.
+#
+# One-time setup (repo → Settings → Secrets and variables → Actions):
+#   Secrets   THE_ODDS_API_KEY
+#             DISCORD_WEBHOOK_URL_US  optional: a separate channel for MLB/NFL alerts
+#                                     (falls back to DISCORD_WEBHOOK_URL)
+#   Variables optional, US_-prefixed so they never change the TT Cup scanner:
+#             US_BET_BOOKS=draftkings,fanduel   only recommend books you can bet at
+#             US_EV_THRESHOLD, US_MAX_ODDS, US_SHARP_BOOKS (default: pinnacle),
+#             ODDS_API_SPORTS / ODDS_API_REGIONS / ODDS_API_MARKETS
+#
+# Cost: each call costs (markets x regions) credits per sport. Defaults (h2h x us,eu,
+# MLB + NFL) are 4 credits a run, about 5,800 credits a month at every 30 minutes.
+# Sports with no games listed cost nothing. Edit the cron below to change the cadence.
+
+name: MLB-NFL EV Scanner
+
+on:
+  schedule:
+    # Every 30 min at :12 and :42 UTC (off the busy top of the hour).
+    - cron: "12,42 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: log the alerts in the job output instead of posting"
+        type: boolean
+        default: true
+      test_alert:
+        description: "Only post one sample alert to check the Discord webhook"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: us-sports-scanner
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
+    steps:
+      - name: Check secrets
+        id: ready
+        env:
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_US || secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          missing=""
+          if [ "$SEND_TEST_ALERT" != "true" ] && [ -z "$THE_ODDS_API_KEY" ]; then missing="$missing THE_ODDS_API_KEY"; fi
+          if [ "$DRY_RUN" != "true" ] && [ -z "$DISCORD_WEBHOOK_URL" ]; then missing="$missing DISCORD_WEBHOOK_URL"; fi
+          if [ -n "$missing" ]; then
+            echo "::warning title=Scanner idle::Add these repository secrets to start scanning:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out code
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        if: steps.ready.outputs.ready == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Restore alert state
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: .state
+          key: us-alert-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            us-alert-state-
+
+      - name: Scan for +EV edges
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          # --- secrets (encrypted by GitHub, masked in logs, never in code) ---
+          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL_US || secrets.DISCORD_WEBHOOK_URL }}
+          # --- this workflow only scans US leagues through The Odds API ---
+          ENABLED_PROVIDERS: the_odds_api
+          ODDS_API_SPORTS: ${{ vars.ODDS_API_SPORTS || 'baseball_mlb,americanfootball_nfl' }}
+          ODDS_API_REGIONS: ${{ vars.ODDS_API_REGIONS || 'us,eu' }}
+          ODDS_API_MARKETS: ${{ vars.ODDS_API_MARKETS || 'h2h' }}
+          ODDS_API_LOOKAHEAD_MIN: ${{ vars.ODDS_API_LOOKAHEAD_MIN || '4320' }}
+          # Price against Pinnacle's no-vig line when it is listed (eu region), else a consensus.
+          SHARP_BOOKS: ${{ vars.US_SHARP_BOOKS || 'pinnacle' }}
+          BET_BOOKS: ${{ vars.US_BET_BOOKS }}
+          EV_THRESHOLD: ${{ vars.US_EV_THRESHOLD }}
+          MIN_ODDS: ${{ vars.US_MIN_ODDS }}
+          MAX_ODDS: ${{ vars.US_MAX_ODDS }}
+          MAX_ALERTS_PER_RUN: ${{ vars.US_MAX_ALERTS_PER_RUN }}
+          DISCORD_USERNAME: ${{ vars.US_DISCORD_USERNAME || 'EV Engine · MLB/NFL' }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+        run: python -m ev_engine
+
+      - name: Save alert state
+        if: always() && steps.ready.outputs.ready == 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .state
+          key: us-alert-state-${{ github.run_id }}-${{ github.run_attempt }}

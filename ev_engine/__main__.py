@@ -14,7 +14,7 @@ import sys
 import time
 
 from .config import ConfigError, Settings, load_dotenv
-from .runner import run, send_test_alert
+from .runner import emit_annotation, run, send_test_alert
 
 log = logging.getLogger("ev_engine")
 
@@ -64,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         configure_logging("INFO", ())
         log.error("Configuration error: %s", exc)
+        emit_annotation("error", "Configuration error", str(exc))
         return 2
 
     configure_logging(settings.log_level, settings.secrets())

@@ -1,12 +1,14 @@
-# Runs the +EV scanner every 15 minutes on a GitHub-hosted runner.
+# TT Cup table-tennis scanner (BetsAPI) - every 15 minutes on a GitHub-hosted runner.
+# MLB / NFL run separately in us-sports-scanner.yml.
 #
 # One-time setup (repo → Settings → Secrets and variables → Actions):
-#   Secrets   BETSAPI_TOKEN, DISCORD_WEBHOOK_URL   (+ THE_ODDS_API_KEY for MLB/NFL)
+#   Secrets   BETSAPI_TOKEN, DISCORD_WEBHOOK_URL
 #   Variables optional overrides of the defaults in ev_engine/config.py,
 #             e.g. EV_THRESHOLD=0.03 or BET_BOOKS=Bet365,Betway
 # Unset variables expand to "" and the engine falls back to its defaults.
+# Until the secrets exist, runs finish green with an "idle" warning instead of failing.
 
-name: EV Scanner
+name: TT Cup EV Scanner
 
 on:
   schedule:
@@ -35,21 +37,45 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    env:
+      # Scheduled runs post for real; manual runs follow the inputs.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
     steps:
+      - name: Check secrets
+        id: ready
+        env:
+          BETSAPI_TOKEN: ${{ secrets.BETSAPI_TOKEN }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          missing=""
+          if [ "$SEND_TEST_ALERT" != "true" ] && [ -z "$BETSAPI_TOKEN" ]; then missing="$missing BETSAPI_TOKEN"; fi
+          if [ "$DRY_RUN" != "true" ] && [ -z "$DISCORD_WEBHOOK_URL" ]; then missing="$missing DISCORD_WEBHOOK_URL"; fi
+          if [ -n "$missing" ]; then
+            echo "::warning title=Scanner idle::Add these repository secrets to start scanning:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Check out code
+        if: steps.ready.outputs.ready == 'true'
         uses: actions/checkout@v7
 
       - name: Set up Python
+        if: steps.ready.outputs.ready == 'true'
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
       - name: Install dependencies
+        if: steps.ready.outputs.ready == 'true'
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       # Alert de-duplication. Cache keys are immutable, so every run saves a new entry
       # and restores the newest one by prefix. GitHub evicts entries unused for 7 days.
       - name: Restore alert state
+        if: steps.ready.outputs.ready == 'true'
         uses: actions/cache/restore@v5
         with:
           path: .state
@@ -58,16 +84,14 @@ jobs:
             ev-alert-state-
 
       - name: Scan for +EV edges
+        if: steps.ready.outputs.ready == 'true'
         env:
           # --- secrets (encrypted by GitHub, masked in logs, never in code) ---
           BETSAPI_TOKEN: ${{ secrets.BETSAPI_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
-          # --- run mode: scheduled runs post for real; manual runs follow the inputs ---
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
-          SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
+          # --- this workflow only scans TT Cup; MLB/NFL have their own workflow ---
+          ENABLED_PROVIDERS: betsapi_tt
           # --- tunables: set any of these under Settings → Secrets and variables → Variables ---
-          ENABLED_PROVIDERS: ${{ vars.ENABLED_PROVIDERS }}
           EV_THRESHOLD: ${{ vars.EV_THRESHOLD }}
           STRONG_EV_THRESHOLD: ${{ vars.STRONG_EV_THRESHOLD }}
           MAX_EV: ${{ vars.MAX_EV }}
@@ -85,14 +109,12 @@ jobs:
           BETSAPI_LEAGUE_IDS: ${{ vars.BETSAPI_LEAGUE_IDS }}
           BETSAPI_MARKETS: ${{ vars.BETSAPI_MARKETS }}
           BETSAPI_LOOKAHEAD_MIN: ${{ vars.BETSAPI_LOOKAHEAD_MIN }}
-          ODDS_API_SPORTS: ${{ vars.ODDS_API_SPORTS }}
-          ODDS_API_REGIONS: ${{ vars.ODDS_API_REGIONS }}
-          ODDS_API_MARKETS: ${{ vars.ODDS_API_MARKETS }}
+          DISCORD_USERNAME: ${{ vars.DISCORD_USERNAME || 'EV Engine · TT Cup' }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
         run: python -m ev_engine
 
       - name: Save alert state
-        if: always()
+        if: always() && steps.ready.outputs.ready == 'true'
         uses: actions/cache/save@v5
         with:
           path: .state
