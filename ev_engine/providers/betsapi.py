@@ -84,6 +84,13 @@ def _to_int(raw: Any) -> int | None:
         return None
 
 
+def _ago(ts: int, now: datetime) -> str:
+    minutes = (now.timestamp() - ts) / 60.0
+    if minutes < 0:
+        return f"{-minutes:.0f}m in the future"
+    return f"{minutes:.0f}m ago" if minutes < 120 else f"{minutes / 60:.1f}h ago"
+
+
 def _name(obj: Any) -> str | None:
     return str(obj["name"]).strip() if isinstance(obj, dict) and obj.get("name") else None
 
@@ -177,6 +184,51 @@ class BetsApiTableTennisProvider(OddsProvider):
                 )
             )
         return events
+
+    def inspect(self, now: datetime, matches: int = 3) -> list[tuple[str, str]]:
+        """Diagnostics: BetsAPI's raw odds summary for the next few fixtures, one line per bookmaker.
+
+        Shows exactly what the freshness and in-play checks see: the last-checked time
+        (odds_update), every snapshot's prices, when each was posted, and any live score.
+        """
+        samples = []
+        for fx in self._upcoming_fixtures(now)[:matches]:
+            data = self._call("/v2/event/odds/summary", event_id=fx["id"])
+            results = data.get("results") if isinstance(data.get("results"), dict) else {}
+            lines = [f"{book}: {self._describe_raw(payload, now)}" for book, payload in sorted(results.items())]
+            minutes = (fx["start"] - now).total_seconds() / 60.0
+            heading = f"{fx['home']} vs {fx['away']} · {fx['league']} · event {fx['id']} · starts in {minutes:.0f} min"
+            samples.append((heading, "\n".join(lines) or "no bookmakers in the odds summary"))
+        return samples
+
+    def _describe_raw(self, payload: Any, now: datetime) -> str:
+        if not isinstance(payload, dict):
+            return f"unexpected {type(payload).__name__}"
+        checked = payload.get("odds_update") if isinstance(payload.get("odds_update"), dict) else {}
+        snapshots = payload.get("odds") if isinstance(payload.get("odds"), dict) else {}
+        parts = [f"matching_dir {payload.get('matching_dir')}"]
+        for key in self.settings.betsapi_markets:
+            ts = _to_int(checked.get(key))
+            parts.append(f"{key} checked {_ago(ts, now)}" if ts else f"{key} no check time")
+            for snap_name in ("start", "kickoff", "end"):
+                snapshot = snapshots.get(snap_name)
+                record = snapshot.get(key) if isinstance(snapshot, dict) else None
+                if not isinstance(record, dict):
+                    continue
+                prices = "/".join(
+                    str(record[f]) for f in ("home_od", "away_od", "over_od", "under_od") if record.get(f) is not None
+                )
+                line = f" line {record['handicap']}" if record.get("handicap") not in (None, "") else ""
+                added = _to_int(record.get("add_time"))
+                text = f"{snap_name} {prices or '-'}{line} posted {_ago(added, now) if added else '?'}"
+                if record.get("ss") not in (None, ""):
+                    text += f" ss={record['ss']!r}"
+                parts.append(text)
+        other = sorted({k for snap in snapshots.values() if isinstance(snap, dict) for k in snap}
+                       - set(self.settings.betsapi_markets))
+        if other:
+            parts.append("also has " + ",".join(other[:8]))
+        return " · ".join(parts)
 
     def _upcoming_fixtures(self, now: datetime) -> list[dict]:
         """Not-started TT Cup fixtures between now + MIN_MINUTES_TO_START and the look-ahead horizon."""

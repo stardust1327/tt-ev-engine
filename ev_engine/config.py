@@ -120,6 +120,7 @@ class Settings:
     providers: tuple[str, ...] = ("betsapi_tt",)  # ENABLED_PROVIDERS
     dry_run: bool = False                        # log alerts instead of posting
     send_test_alert: bool = False                # post one sample embed and exit
+    inspect_odds: bool = False                   # diagnostics: show raw odds for the next matches, exit
     log_level: str = "INFO"
     request_timeout: float = 15.0                # seconds, every HTTP call
 
@@ -175,6 +176,7 @@ class Settings:
             providers=tuple(p.lower() for p in _list("ENABLED_PROVIDERS", d.providers)),
             dry_run=_bool("DRY_RUN", d.dry_run),
             send_test_alert=_bool("SEND_TEST_ALERT", d.send_test_alert),
+            inspect_odds=_bool("INSPECT_ODDS", d.inspect_odds),
             log_level=_str("LOG_LEVEL", d.log_level).upper(),
             request_timeout=_float("REQUEST_TIMEOUT", d.request_timeout, 1, 120),
             ev_threshold=_float("EV_THRESHOLD", d.ev_threshold, 0.0, 0.99),
@@ -238,7 +240,7 @@ class Settings:
             raise ConfigError(f"ODDS_API_MARKETS must be a subset of {', '.join(ODDS_API_MARKET_KEYS)}")
         if not self.tt_leagues and not self.betsapi_league_ids:
             raise ConfigError("Set TT_LEAGUES (league-name filter) or BETSAPI_LEAGUE_IDS")
-        if not self.dry_run and not self.discord_webhook_url:
+        if not (self.dry_run or self.inspect_odds) and not self.discord_webhook_url:
             raise ConfigError("DISCORD_WEBHOOK_URL is not set (or set DRY_RUN=true to run without Discord)")
         if self.discord_webhook_url and not _WEBHOOK_RE.match(self.discord_webhook_url):
             raise ConfigError(

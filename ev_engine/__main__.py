@@ -3,6 +3,7 @@
     python -m ev_engine              one scan (what GitHub Actions runs every 15 minutes)
     python -m ev_engine --dry-run    scan, but log the Discord payloads instead of posting
     python -m ev_engine --test-alert post one sample embed to verify the webhook
+    python -m ev_engine --inspect    show the raw odds for the next few matches (diagnostics)
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import sys
 import time
 
 from .config import ConfigError, Settings, load_dotenv
-from .runner import emit_annotation, run, send_test_alert
+from .runner import emit_annotation, inspect_odds, run, send_test_alert
 
 log = logging.getLogger("ev_engine")
 
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="log alerts instead of posting to Discord")
     parser.add_argument("--test-alert", action="store_true", help="post one sample alert to verify the webhook")
+    parser.add_argument("--inspect", action="store_true", help="show the raw odds for the next few matches")
     args = parser.parse_args(argv)
 
     load_dotenv()  # local convenience; real environment variables always win
@@ -58,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["DRY_RUN"] = "true"
     if args.test_alert:
         os.environ["SEND_TEST_ALERT"] = "true"
+    if args.inspect:
+        os.environ["INSPECT_ODDS"] = "true"
 
     try:
         settings = Settings.from_env()
@@ -69,7 +73,9 @@ def main(argv: list[str] | None = None) -> int:
 
     configure_logging(settings.log_level, settings.secrets())
     try:
-        return send_test_alert(settings) if settings.send_test_alert else run(settings)
+        if settings.send_test_alert:
+            return send_test_alert(settings)
+        return inspect_odds(settings) if settings.inspect_odds else run(settings)
     except Exception:  # last-resort guard: log (redacted) instead of a raw traceback
         log.exception("Unhandled error - aborting this run")
         return 1

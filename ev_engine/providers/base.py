@@ -12,7 +12,8 @@ import requests
 
 from ..config import Settings
 from ..http_client import ApiClient
-from ..models import Event, RunReport
+from ..models import MARKET_LABELS, Event, RunReport, format_line
+from ..quant import overround
 
 
 class OddsProvider(ABC):
@@ -54,3 +55,27 @@ class OddsProvider(ABC):
 
     def usage(self) -> str:
         return self.client.usage()
+
+    def inspect(self, now: datetime, matches: int = 3) -> list[tuple[str, str]]:
+        """Diagnostics: (heading, one line per book) for the next few matches, as parsed.
+
+        Providers can override this to show their raw payload instead (see BetsAPI).
+        """
+        events = sorted(self.fetch_events(now), key=lambda e: e.start_time)[:matches]
+        samples = []
+        for event in events:
+            minutes = (event.start_time - now).total_seconds() / 60.0
+            lines = []
+            for bm in event.markets:
+                market = MARKET_LABELS.get(bm.market, bm.market)
+                if bm.line is not None:
+                    market += f" {format_line(bm.line)}"
+                prices = " / ".join(f"{o.name} {o.price:.2f}" for o in bm.outcomes)
+                margin = overround([o.price for o in bm.outcomes]) - 1
+                age = (
+                    f"confirmed {(now - bm.updated_at).total_seconds() / 60:.0f}m ago"
+                    if bm.updated_at else "no timestamp"
+                )
+                lines.append(f"{bm.bookmaker} · {market}: {prices} · margin {margin:.1%} · {age}")
+            samples.append((f"{event.matchup} · {event.league} · starts in {minutes:.0f} min", "\n".join(lines)))
+        return samples

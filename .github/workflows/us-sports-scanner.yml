@@ -29,6 +29,10 @@ on:
         description: "Only post one sample alert to check the Discord webhook"
         type: boolean
         default: false
+      inspect_odds:
+        description: "Diagnostics: show the raw odds for the next 3 matches (no alerts)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +48,7 @@ jobs:
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
+      INSPECT_ODDS: ${{ github.event_name == 'workflow_dispatch' && inputs.inspect_odds || false }}
     steps:
       - name: Check secrets
         id: ready
@@ -53,7 +58,7 @@ jobs:
         run: |
           missing=""
           if [ "$SEND_TEST_ALERT" != "true" ] && [ -z "$THE_ODDS_API_KEY" ]; then missing="$missing THE_ODDS_API_KEY"; fi
-          if [ "$DRY_RUN" != "true" ] && [ -z "$DISCORD_WEBHOOK_URL" ]; then missing="$missing DISCORD_WEBHOOK_URL"; fi
+          if [ "$DRY_RUN" != "true" ] && [ "$INSPECT_ODDS" != "true" ] && [ -z "$DISCORD_WEBHOOK_URL" ]; then missing="$missing DISCORD_WEBHOOK_URL"; fi
           if [ -n "$missing" ]; then
             echo "::warning title=Scanner idle::Add these repository secrets to start scanning:$missing"
             echo "ready=false" >> "$GITHUB_OUTPUT"

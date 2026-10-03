@@ -167,6 +167,7 @@ class RunReport:
     books_usable: Counter = field(default_factory=Counter)   # n fresh, sane-margin books -> number of lines
     book_quotes: Counter = field(default_factory=Counter)    # bookmaker -> lines it quoted
     book_usable: Counter = field(default_factory=Counter)    # bookmaker -> lines where it could inform the fair line
+    book_ages: dict[str, list[float]] = field(default_factory=dict)  # bookmaker -> minutes since each confirmation
 
     MAX_SKIP_DETAILS = 300  # keep memory bounded; counts stay exact
 
@@ -177,10 +178,23 @@ class RunReport:
             self.skips.append(Skip(category, detail))
         log.debug("skip [%s] %s", category, detail)
 
-    def record_coverage(self, quoting: Iterable[str], usable: Iterable[str]) -> None:
+    def record_coverage(self, quoting: Iterable[BookMarket], usable: Iterable[BookMarket], now: datetime) -> None:
         """Note which books priced one market line, and which of them were fit for the fair line."""
-        quoting, usable = set(quoting), set(usable)
-        self.books_quoting[len(quoting)] += 1
-        self.books_usable[len(usable)] += 1
-        self.book_quotes.update(quoting)
-        self.book_usable.update(usable)
+        quoting = list(quoting)
+        quoted_by = {bm.bookmaker for bm in quoting}
+        usable_by = {bm.bookmaker for bm in usable}
+        self.books_quoting[len(quoted_by)] += 1
+        self.books_usable[len(usable_by)] += 1
+        self.book_quotes.update(quoted_by)
+        self.book_usable.update(usable_by)
+        for bm in quoting:
+            if bm.updated_at is not None:
+                self.book_ages.setdefault(bm.bookmaker, []).append((now - bm.updated_at).total_seconds() / 60.0)
+
+    def median_age(self, book: str) -> float | None:
+        """Median minutes since `book`'s prices were last confirmed, across this run's lines."""
+        ages = sorted(self.book_ages.get(book, ()))
+        if not ages:
+            return None
+        mid = len(ages) // 2
+        return ages[mid] if len(ages) % 2 else (ages[mid - 1] + ages[mid]) / 2

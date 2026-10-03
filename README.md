@@ -51,7 +51,7 @@ ev_engine/
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               131 tests, all HTTP mocked (pytest + responses)
+tests/               137 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -148,6 +148,9 @@ Any variable you don't set falls back to the defaults in `ev_engine/config.py`.
 1. Tick **Only post one sample alert** and untick **Dry run** → a 🧪 TEST embed should land in Discord.
 2. Run again with **Dry run** ticked → the job log shows exactly what would be posted, and the run page shows a
    summary of events scanned, edges, skip reasons and API usage.
+3. Something looks off (say, every match skipped as stale)? Run with **Diagnostics: show the raw odds** ticked.
+   Each of the next 3 matches becomes an annotation listing every bookmaker's prices, when each was posted and
+   when the API last checked it. Nothing is posted to Discord.
 
 After that the schedule takes over: scheduled runs always post for real. Every run also leaves a one-line
 **EV scan** annotation on its run page (events, edges, alerts, API calls and credits left), and any error shows
@@ -267,7 +270,8 @@ pip install -r requirements-dev.txt
 cp .env.example .env              # fill in your token + webhook; .env is git-ignored
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
-pytest                            # 131 tests, no network needed
+python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
+pytest                            # 137 tests, no network needed
 ```
 
 ---

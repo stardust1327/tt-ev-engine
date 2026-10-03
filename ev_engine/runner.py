@@ -153,6 +153,46 @@ def send_test_alert(
     return 0
 
 
+def inspect_odds(
+    settings: Settings,
+    *,
+    now: datetime | None = None,
+    session: requests.Session | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    matches: int = 3,
+) -> int:
+    """Diagnostics: show what each provider returns for the next few matches. No analysis, no alerts.
+
+    Each match becomes one annotation, so the raw prices, timestamps and flags behind a
+    skip reason ("Stale prices", "No fair line") can be read straight off the run page.
+    """
+    now = now or datetime.now(timezone.utc)
+    report = RunReport(started_at=now)
+    try:
+        providers = build_providers(settings, report, session=session, sleep=sleep)
+    except ConfigError as exc:
+        log.error("Configuration error: %s", exc)
+        emit_annotation("error", "Configuration error", str(exc), settings.secrets())
+        return 2
+    status = 0
+    for provider in providers:
+        title = f"Odds sample · {provider.label}"
+        try:
+            samples = provider.inspect(now, matches)
+        except ApiError as exc:
+            log.error("%s: %s", provider.label, exc)
+            emit_annotation("error", title, str(exc), settings.secrets())
+            status = 1
+            continue
+        if not samples:
+            samples = [("No upcoming matches with odds in the look-ahead window", "")]
+        for heading, body in samples:
+            log.info("%s\n%s", heading, body)
+            emit_annotation("notice", title, f"{heading}\n{body}".rstrip(), settings.secrets())
+        log.info("API usage - %s: %s", provider.label, provider.usage())
+    return status
+
+
 # -- reporting ------------------------------------------------------------------------
 def _escape_command(text: str, *, prop: bool = False) -> str:
     text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
@@ -219,14 +259,25 @@ def coverage_summary(report: RunReport, settings: Settings, *, max_books: int = 
         return None
     lines = sum(report.books_quoting.values())
     ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
-    books = ", ".join(f"{book} {quoted}/{report.book_usable[book]}" for book, quoted in ranked[:max_books])
+    books = ", ".join(
+        f"{book} {quoted}/{report.book_usable[book]}{_age_note(report.median_age(book))}"
+        for book, quoted in ranked[:max_books]
+    )
     if len(ranked) > max_books:
         books += f", +{len(ranked) - max_books} more"
     return (
         f"{lines} market line(s). Books quoting each: {_depth(report.books_quoting)}. "
         f"Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}. "
-        f"By book (lines quoted/usable): {books}. {_fair_line_needs(settings)}."
+        f"By book (lines quoted/usable, median price age): {books}. {_fair_line_needs(settings)}."
     )
+
+
+def _age(minutes: float) -> str:
+    return f"{minutes:.0f}m" if minutes < 120 else f"{minutes / 60:.1f}h"
+
+
+def _age_note(minutes: float | None) -> str:
+    return "" if minutes is None else f" ({_age(minutes)})"
 
 
 def _log_summary(report: RunReport, settings: Settings) -> None:
@@ -285,9 +336,13 @@ def write_step_summary(report: RunReport, settings: Settings, path: str | None =
                   f"- Books quoting each market line: {_depth(report.books_quoting)}",
                   f"- Usable for the fair line (fresh, sane margin): {_depth(report.books_usable)}",
                   f"- {_fair_line_needs(settings)}",
-                  "", "| Book | Lines quoted | Usable for the fair line |", "|---|---|---|"]
+                  "", "| Book | Lines quoted | Usable for the fair line | Median price age |", "|---|---|---|---|"]
         ranked = sorted(report.book_quotes.items(), key=lambda kv: (-kv[1], kv[0].lower()))
-        lines += [f"| {_cell(book)} | {quoted} | {report.book_usable[book]} |" for book, quoted in ranked[:40]]
+        lines += [
+            f"| {_cell(book)} | {quoted} | {report.book_usable[book]} | "
+            f"{_age(age) if (age := report.median_age(book)) is not None else '-'} |"
+            for book, quoted in ranked[:40]
+        ]
     if report.skip_counts:
         lines += ["", "**Skipped**", ""]
         lines += [f"- {n}× {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common()]
