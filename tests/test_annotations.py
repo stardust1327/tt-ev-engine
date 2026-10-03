@@ -38,6 +38,20 @@ def test_run_emits_a_notice_with_the_result(monkeypatch, capsys, tmp_path):
 
 
 @responses.activate
+def test_run_lists_edges_in_an_annotation(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    responses.add(responses.GET, f"{BETSAPI}/v3/events/upcoming", json=upcoming(fixture("e1", 25)))
+    responses.add(responses.GET, f"{BETSAPI}/v2/event/odds/summary", json=summary(
+        Bet365=book_odds("1.9", "1.9"), BWin=book_odds("1.87", "1.93"),
+        Betway=book_odds("1.93", "1.87"), Unibet=book_odds("1.70", "2.25")))
+    assert run(make_settings(tmp_path, dry_run=True), now=NOW, sleep=lambda _s: None) == 0
+    edges = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice title=Edges::")]
+    assert len(edges) == 1
+    assert edges[0].startswith("::notice title=Edges::+")
+    assert "Petrov A. @ 2.25 on Unibet (fair " in edges[0] and "Ivanov D. vs Petrov A. · 21:25 UTC" in edges[0]
+
+
+@responses.activate
 def test_provider_error_becomes_an_error_annotation(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     responses.add(responses.GET, f"{BETSAPI}/v3/events/upcoming", json={"success": 0, "error": "AUTHORIZE_FAILED"})

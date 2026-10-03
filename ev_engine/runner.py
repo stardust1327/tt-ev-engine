@@ -223,11 +223,21 @@ def _annotate(report: RunReport, settings: Settings) -> None:
         parts.append("skipped: " + ", ".join(
             f"{n}x {SKIP_LABELS.get(c, c)}" for c, n in report.skip_counts.most_common(4)))
     emit_annotation("notice", "EV scan", " | ".join(parts), settings.secrets())
+    if report.edges:
+        top = sorted(report.edges, key=lambda e: e.ev, reverse=True)
+        lines = [_edge_line(e) for e in top[:5]] + ([f"+{len(top) - 5} more"] if len(top) > 5 else [])
+        emit_annotation("notice", "Edges", "\n".join(lines), settings.secrets())
     coverage = coverage_summary(report, settings)
     if coverage:
         emit_annotation("notice", "Book coverage", coverage, settings.secrets())
     for error in report.errors[:8]:
         emit_annotation("error", "EV scan error", error, settings.secrets())
+
+
+def _edge_line(e: Edge) -> str:
+    """e.g. '+3.1% · Petrov A. @ 2.10 on DraftKings (fair 2.04; <reference>) · Ivanov D. vs Petrov A. · 21:30 UTC'."""
+    return (f"{e.ev:+.1%} · {e.selection} @ {e.price:.2f} on {e.bookmaker} (fair {e.fair_odds:.2f}; {e.reference}) · "
+            f"{e.event.matchup} · {e.event.start_time:%H:%M} UTC")
 
 
 def _books(n: int) -> str:
