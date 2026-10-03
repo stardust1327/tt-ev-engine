@@ -85,6 +85,24 @@ def parse_retry_after(value: str | None, now: datetime | None = None) -> float |
     return max(0.0, (when - now).total_seconds())
 
 
+def error_detail(resp: requests.Response, limit: int = 200) -> str:
+    """The provider's own explanation from an error body, e.g. ' (INVALID_KEY: API key is not valid)'.
+
+    The Odds API sends {"message", "error_code"}; BetsAPI sends {"error", "error_detail"}.
+    Returns '' when the body has neither. Callers' log/annotation output is secret-redacted.
+    """
+    try:
+        body = resp.json()
+    except ValueError:
+        return ""
+    if not isinstance(body, dict):
+        return ""
+    code = body.get("error_code") or body.get("error")
+    message = body.get("message") or body.get("error_detail")
+    text = ": ".join(str(part) for part in (code, message) if part)
+    return f" ({text[:limit]})" if text else ""
+
+
 class ApiClient:
     """GET-and-decode-JSON with retries, backoff, quota tracking and a call budget."""
 
@@ -193,12 +211,12 @@ class ApiClient:
 
             if status in (401, 403):
                 raise ApiError(
-                    f"{self.name} {path}: HTTP {status} - check the API key/token and your plan",
+                    f"{self.name} {path}: HTTP {status}{error_detail(resp)} - check the API key/token and your plan",
                     status=status,
                     fatal=True,
                 )
             if status >= 400:
-                raise ApiError(f"{self.name} {path}: HTTP {status}", status=status)
+                raise ApiError(f"{self.name} {path}: HTTP {status}{error_detail(resp)}", status=status)
 
             try:
                 return resp.json()
