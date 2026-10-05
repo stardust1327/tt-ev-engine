@@ -101,14 +101,15 @@ jobs:
           # Only Pinnacle (the sharp reference) plus your sportsbooks. Up to 10 named books cost
           # the same as one region, half of regions=us,eu. Caesars (williamhill_us) is only
           # returned on paid Odds API plans. ODDS_API_REGIONS is ignored while this is set.
-          ODDS_API_BOOKMAKERS: ${{ vars.ODDS_API_BOOKMAKERS || 'pinnacle,draftkings,fanduel,betmgm,williamhill_us,hardrockbet_az,ballybet' }}
+          ODDS_API_BOOKMAKERS: ${{ vars.ODDS_API_BOOKMAKERS || 'pinnacle,draftkings,fanduel,betmgm,williamhill_us,hardrockbet_az,hardrockbet,ballybet' }}
           ODDS_API_REGIONS: ${{ vars.ODDS_API_REGIONS || 'us,eu' }}
           ODDS_API_MARKETS: ${{ vars.ODDS_API_MARKETS || 'h2h' }}
           ODDS_API_LOOKAHEAD_MIN: ${{ vars.ODDS_API_LOOKAHEAD_MIN || '4320' }}
           # Price against Pinnacle's no-vig line when it is listed (eu region), else a consensus.
           SHARP_BOOKS: ${{ vars.US_SHARP_BOOKS || 'pinnacle' }}
-          # Only alert prices you can actually bet: your sportsbooks (Arizona Hard Rock prices).
-          BET_BOOKS: ${{ vars.US_BET_BOOKS || 'draftkings,fanduel,betmgm,williamhill_us,hardrockbet_az,ballybet' }}
+          # Only alert prices you can actually bet: your sportsbooks. Hard Rock comes as its Arizona
+          # feed plus the multi-state one, which the API says shares odds with several states.
+          BET_BOOKS: ${{ vars.US_BET_BOOKS || 'draftkings,fanduel,betmgm,williamhill_us,hardrockbet_az,hardrockbet,ballybet' }}
           EV_THRESHOLD: ${{ vars.US_EV_THRESHOLD }}
           MIN_ODDS: ${{ vars.US_MIN_ODDS }}
           MAX_ODDS: ${{ vars.US_MAX_ODDS }}
