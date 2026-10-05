@@ -111,7 +111,9 @@ jobs:
           MIN_ODDS: ${{ vars.MIN_ODDS }}
           MAX_ODDS: ${{ vars.MAX_ODDS }}
           MAX_ODDS_AGE_MIN: ${{ vars.MAX_ODDS_AGE_MIN }}
-          BET_BOOKS: ${{ vars.BET_BOOKS }}
+          # Your sportsbooks. Of these, BetsAPI's TT Cup feed carries DraftKings and Bet365 today;
+          # the others are listed so they count if it adds them. Other books still feed the fair line.
+          BET_BOOKS: ${{ vars.BET_BOOKS || 'DraftKings,Bet365,FanDuel,BetMGM,Caesars,HardRockBet,BallyBet' }}
           MAX_ALERTS_PER_RUN: ${{ vars.MAX_ALERTS_PER_RUN }}
           TT_LEAGUES: ${{ vars.TT_LEAGUES }}
           BETSAPI_LEAGUE_IDS: ${{ vars.BETSAPI_LEAGUE_IDS }}

@@ -51,7 +51,7 @@ ev_engine/
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               143 tests, all HTTP mocked (pytest + responses)
+tests/               146 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -199,7 +199,7 @@ TT Cup.
 | `MIN_ODDS` / `MAX_ODDS` | `1.10` / `5.00` | only alert prices in this range |
 | `MAX_ODDS_AGE_MIN` | `10` | ignore prices not confirmed this recently |
 | `MIN_MINUTES_TO_START` | `2` | skip matches about to start |
-| `BET_BOOKS` | *(empty = any)* | only recommend these books |
+| `BET_BOOKS` | *(empty = any)*; both workflows default to your sportsbooks | only recommend these books |
 | `MAX_ALERTS_PER_RUN` | `20` | flood guard; extra edges wait for the next run |
 | `REALERT_EV_DELTA` | `0.01` | re-alert a pick only if its EV rises by this much |
 | `TT_LEAGUES` | `TT Cup` | league-name filter (substring, comma list) |
@@ -211,6 +211,7 @@ TT Cup.
 | `BETSAPI_BASE_URL` | `https://api.b365api.com` | BetsAPI's backup endpoint is `https://api.betsapi.com` |
 | `ODDS_API_SPORTS` | `baseball_mlb,americanfootball_nfl` | The Odds API sport keys |
 | `ODDS_API_REGIONS` / `ODDS_API_MARKETS` | `us,eu` / `h2h` | each region × market costs a credit per call |
+| `ODDS_API_BOOKMAKERS` | *(empty)*; MLB-NFL workflow: Pinnacle + your books | named books instead of regions; every 10 books cost one region |
 | `ODDS_API_LOOKAHEAD_MIN` / `ODDS_API_MIN_REMAINING` | `1440` (workflow: `4320`) / `50` | window and monthly-credit floor |
 | `DRY_RUN` / `LOG_LEVEL` | `false` / `INFO` | |
 
@@ -224,11 +225,12 @@ only match across books when the number is identical.
 - **BetsAPI**: 3,600 requests per hour by default. A run makes one call per fixture page plus one per match
   (about 10-70). The client reads `X-RateLimit-Remaining`, stops at `BETSAPI_MIN_REMAINING`, never exceeds
   `BETSAPI_MAX_CALLS`, honours `Retry-After` on HTTP 429, and treats `TOO_MANY_REQUESTS` as "stop for this run".
-- **The Odds API**: each call costs *markets × regions* credits per sport, whatever the number of games. The
-  MLB-NFL workflow's defaults (h2h × us,eu, two sports, every 30 minutes) cost 4 credits a run, about 5,800 a
-  month; a sport with no games listed costs nothing. That needs a paid plan (the free tier is 500 credits a
-  month). Running every 15 minutes doubles it; adding spreads and totals triples it. The engine stops calling
-  when credits left reach `ODDS_API_MIN_REMAINING`.
+- **The Odds API**: each call costs *markets × regions* credits per sport, whatever the number of games, and
+  naming bookmakers instead counts every 10 books as one region. The MLB-NFL workflow names 7 books (Pinnacle
+  plus your sportsbooks), so with h2h, two sports and a run every 30 minutes it costs 2 credits a run, about
+  2,900 a month; a sport with no games listed costs nothing. That needs a paid plan (the free tier is 500
+  credits a month). Running every 15 minutes doubles it; adding spreads and totals triples it. The engine stops
+  calling when credits left reach `ODDS_API_MIN_REMAINING`.
 - **Discord**: on HTTP 429 the notifier waits `retry_after` and retries; when the bucket is empty it waits
   `X-RateLimit-Reset-After`; up to 10 embeds and 6,000 characters per message; a 404 (deleted webhook) stops
   delivery and fails the run.
@@ -257,12 +259,14 @@ emails you), `2` configuration error.
 (`:12` and `:42`), looking up to 3 days ahead so NFL games show up from midweek.
 
 1. Add the `THE_ODDS_API_KEY` secret (and `DISCORD_WEBHOOK_URL_US` for a separate channel).
-2. Optional variables: `US_BET_BOOKS` = the US books you can bet at (e.g. `draftkings,fanduel`),
-   `US_EV_THRESHOLD`, `ODDS_API_MARKETS = h2h,spreads,totals` (3× the credits).
+2. Optional variables: `US_BET_BOOKS` = the US books you can bet at (the workflow defaults to DraftKings,
+   FanDuel, BetMGM, Caesars, Hard Rock (Arizona) and Bally Bet), `ODDS_API_BOOKMAKERS` = the books to download
+   (defaults to those plus Pinnacle; keys are listed on The Odds API's bookmakers page), `US_EV_THRESHOLD`,
+   `ODDS_API_MARKETS = h2h,spreads,totals` (3× the credits). Caesars is only returned on paid plans.
 3. Run **MLB-NFL EV Scanner** with **Dry run** ticked to see the first scan.
 
-The fair line is Pinnacle's no-vig price whenever Pinnacle lists the game (The Odds API's `eu` region;
-`US_SHARP_BOOKS` changes this), otherwise a consensus of the other books. To change the cadence, edit the cron at
+The fair line is Pinnacle's no-vig price whenever Pinnacle lists the game (`US_SHARP_BOOKS` changes this),
+otherwise a consensus of the other downloaded books. To change the cadence, edit the cron at
 the top of the workflow file.
 
 **Another data source**: subclass `OddsProvider` in `ev_engine/providers/`, return normalized `Event`s, and add
@@ -283,7 +287,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 143 tests, no network needed
+pytest                            # 146 tests, no network needed
 ```
 
 ---

@@ -8,12 +8,13 @@ Endpoint (docs: https://the-odds-api.com/liveapi/guides/v4/)
   GET /v4/sports/{sport}/odds?apiKey&regions&markets&oddsFormat=decimal&dateFormat=unix
       &commenceTimeFrom&commenceTimeTo
 
-Quota: each call costs (number of markets) x (number of regions) credits. Remaining
+Quota: each call costs (number of markets) x (number of regions) credits, where naming
+bookmakers instead (ODDS_API_BOOKMAKERS) counts every 10 books as one region. Remaining
 credits come back in x-requests-remaining; ApiClient stops at ODDS_API_MIN_REMAINING.
 Bursts trigger HTTP 429, so calls are spaced out and retried with backoff.
 
-Tip: include region 'eu' so Pinnacle is in the feed, then set SHARP_BOOKS=pinnacle to
-price edges against the sharpest line instead of a soft-book consensus.
+Tip: get Pinnacle into the feed (region 'eu', or 'pinnacle' in ODDS_API_BOOKMAKERS), then set
+SHARP_BOOKS=pinnacle to price edges against the sharpest line instead of a soft-book consensus.
 """
 
 from __future__ import annotations
@@ -114,13 +115,17 @@ class TheOddsApiProvider(OddsProvider):
         s = self.settings
         base_params = {
             "apiKey": s.the_odds_api_key,
-            "regions": ",".join(s.odds_api_regions),
             "markets": ",".join(s.odds_api_markets),
             "oddsFormat": "decimal",
             "dateFormat": "unix",
             "commenceTimeFrom": _iso(now + timedelta(minutes=s.min_minutes_to_start)),
             "commenceTimeTo": _iso(now + timedelta(minutes=s.odds_api_lookahead_min)),
         }
+        if s.odds_api_bookmakers:
+            # The API prefers bookmakers over regions anyway; sending only one keeps the cost obvious.
+            base_params["bookmakers"] = ",".join(s.odds_api_bookmakers)
+        else:
+            base_params["regions"] = ",".join(s.odds_api_regions)
         events: list[Event] = []
         for sport in s.odds_api_sports:
             try:

@@ -235,6 +235,7 @@ _TUNABLES: dict[str, str] = {
     "betsapi_lookahead_min": "BETSAPI_LOOKAHEAD_MIN",
     "odds_api_sports": "ODDS_API_SPORTS",
     "odds_api_regions": "ODDS_API_REGIONS",
+    "odds_api_bookmakers": "ODDS_API_BOOKMAKERS",
     "odds_api_markets": "ODDS_API_MARKETS",
     "odds_api_lookahead_min": "ODDS_API_LOOKAHEAD_MIN",
 }

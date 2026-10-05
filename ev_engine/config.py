@@ -161,6 +161,9 @@ class Settings:
     odds_api_base_url: str = "https://api.the-odds-api.com"
     odds_api_sports: tuple[str, ...] = ("baseball_mlb", "americanfootball_nfl")
     odds_api_regions: tuple[str, ...] = ("us", "eu")  # 'eu' brings in Pinnacle
+    # Named books instead of whole regions (takes priority over regions). Every 10 books cost
+    # one region, so "pinnacle + your books" costs half of regions=us,eu.
+    odds_api_bookmakers: tuple[str, ...] = ()
     odds_api_markets: tuple[str, ...] = ("h2h",)
     odds_api_lookahead_min: int = 1440
     odds_api_min_remaining: int = 50                  # monthly credits floor
@@ -209,6 +212,7 @@ class Settings:
             odds_api_base_url=_str("ODDS_API_BASE_URL", d.odds_api_base_url),
             odds_api_sports=_list("ODDS_API_SPORTS", d.odds_api_sports),
             odds_api_regions=_list("ODDS_API_REGIONS", d.odds_api_regions),
+            odds_api_bookmakers=tuple(b.lower() for b in _list("ODDS_API_BOOKMAKERS", d.odds_api_bookmakers)),
             odds_api_markets=_list("ODDS_API_MARKETS", d.odds_api_markets),
             odds_api_lookahead_min=_int("ODDS_API_LOOKAHEAD_MIN", d.odds_api_lookahead_min, 5, 30 * 1440),
             odds_api_min_remaining=_int("ODDS_API_MIN_REMAINING", d.odds_api_min_remaining, 0, 10_000_000),
