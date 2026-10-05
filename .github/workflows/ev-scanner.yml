@@ -14,6 +14,15 @@
 
 name: TT Cup EV Scanner
 
+# Run titles in the Actions list say what each run was; the Scan Timer only counts
+# "TT Cup scan" runs, so manual dry runs and tests never hold back a live scan.
+run-name: >-
+  ${{ inputs.test_alert && 'TT Cup test alert'
+  || inputs.inspect_odds && 'TT Cup odds diagnostics'
+  || inputs.dry_run && 'TT Cup scan (dry run)'
+  || inputs.report_now && 'TT Cup report card and scan'
+  || 'TT Cup scan' }}
+
 on:
   # No schedule here: scan-timer.yml starts this every 15 minutes with dry_run=false.
   workflow_dispatch:

@@ -218,7 +218,9 @@ workflow starts whichever scanner is due (TT Cup every 15 minutes, MLB/NFL every
    - Turn on the failure email, then **Test run**: GitHub answers `204 No Content`.
 
 Until the job exists, `scan-timer-backup.yml` runs the same tick on GitHub's schedule, and it keeps doing so
-as a backup. Each tick checks when each scanner last ran, so the backup and the timer never double up.
+as a backup. Each tick checks when each scanner last ran a live scan, so the backup and the timer never double
+up. Runs are titled by type in the Actions list ("TT Cup scan", "TT Cup scan (dry run)", "TT Cup test alert"),
+and only live scans count, so testing by hand never holds back a scheduled scan.
 `TT_SCAN_EVERY_MIN` / `US_SCAN_EVERY_MIN` (multiples of 15) change the pace, e.g. `US_SCAN_EVERY_MIN=60`
 halves the Odds API credits.
 

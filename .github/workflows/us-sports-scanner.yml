@@ -17,6 +17,14 @@
 
 name: MLB-NFL EV Scanner
 
+# Run titles in the Actions list say what each run was; the Scan Timer only counts
+# "MLB-NFL scan" runs, so manual dry runs and tests never hold back a live scan.
+run-name: >-
+  ${{ inputs.test_alert && 'MLB-NFL test alert'
+  || inputs.inspect_odds && 'MLB-NFL odds diagnostics'
+  || inputs.dry_run && 'MLB-NFL scan (dry run)'
+  || 'MLB-NFL scan' }}
+
 on:
   # No schedule here: scan-timer.yml starts this every 30 minutes with dry_run=false.
   workflow_dispatch:
