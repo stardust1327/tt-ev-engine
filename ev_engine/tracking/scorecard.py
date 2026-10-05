@@ -105,8 +105,10 @@ def _ev_band(row: dict[str, str]) -> str:
 def _age_band(row: dict[str, str]) -> str:
     age = num(row.get("price_age_min"))
     if age is None:
-        return "4 unknown"
-    return "1 up to 5 min" if age <= 5 else ("2 5-10 min" if age <= 10 else "3 over 10 min")
+        return "5 unknown"
+    if age <= 5:
+        return "1 up to 5 min"
+    return "2 5-10 min" if age <= 10 else ("3 10-20 min" if age <= 20 else "4 over 20 min")
 
 
 SPLITS: dict[str, Callable[[dict[str, str]], str]] = {

@@ -146,7 +146,11 @@ jobs:
           MAX_OVERROUND: ${{ vars.MAX_OVERROUND }}
           MIN_ODDS: ${{ vars.MIN_ODDS }}
           MAX_ODDS: ${{ vars.MAX_ODDS }}
-          MAX_ODDS_AGE_MIN: ${{ vars.MAX_ODDS_AGE_MIN }}
+          # BetsAPI re-checks DraftKings' TT prices in bulk about every 15-20 minutes, so a 10-minute
+          # window drops DraftKings from over half of the scans. 20 keeps it in about 3 of 4 while still
+          # skipping the long gaps (30-60 min). The tracker's "By price age at alert" table shows whether
+          # the 10-20 minute alerts hold up; set the variable to 10 to go back.
+          MAX_ODDS_AGE_MIN: ${{ vars.MAX_ODDS_AGE_MIN || '20' }}
           # Your sportsbooks. Of these, BetsAPI's TT Cup feed carries DraftKings and Bet365 today;
           # the others are listed so they count if it adds them. Other books still feed the fair line.
           BET_BOOKS: ${{ vars.BET_BOOKS || 'DraftKings,Bet365,FanDuel,BetMGM,Caesars,HardRockBet,BallyBet' }}

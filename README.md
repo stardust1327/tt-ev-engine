@@ -69,7 +69,7 @@ ev_engine/
     grading.py       results, profit, closing line, CLV  (pure, unit-tested)
     scorecard.py     report card: ROI + luck band, CLV verdict, calibration, book accuracy
     tracker.py       log alerts → grade finished matches → REPORT.md + weekly Discord card
-tests/               187 tests, all HTTP mocked (pytest + responses)
+tests/               188 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -109,10 +109,12 @@ mean), so a match is priced when all three have fresh prices. `MIN_CONSENSUS_BOO
 only two fresh books, against that one other book: more alerts, but a single stale book is enough to fake an
 edge. The **Book coverage** annotation on each run shows how many books each match had.
 
-Two things about this feed shape what you'll see. BetsAPI re-checks DraftKings' TT prices far less often than
-Bet365's or FonBet's (gaps of 17+ minutes in testing), so DraftKings drops out of the 10-minute freshness window
-between checks and TT alerts tend to come in bursts after each refresh. Raising `MAX_ODDS_AGE_MIN` to 30 gives
-more alerts on older prices. And with no sharp book in the mix, an "edge" means one book disagrees with the
+Two things about this feed shape what you'll see. BetsAPI re-checks DraftKings' TT prices in bulk, far less
+often than Bet365's or FonBet's: across 38 scans in October 2026, DraftKings' prices were 10 minutes old or less
+in 17 and 11-56 minutes old in the rest. So the TT Cup workflow sets `MAX_ODDS_AGE_MIN=20`, which keeps
+DraftKings in about 3 scans of 4 (instead of under half) while the long gaps stay out. The accuracy tracker's
+**By price age at alert** table shows whether the 10-20 minute alerts hold up; set the variable to `10` to go
+back. And with no sharp book in the mix, an "edge" means one book disagrees with the
 other two, which can be the slow book (a real edge) or the one that just moved on news (not one). Check the
 price at the book before betting, and track closing-line value.
 
@@ -123,7 +125,7 @@ the home player: `EV = 2.10 × 0.50 − 1 = +5.0%`. The other side at `1.75`: `1
 
 | Gate | Default | Why |
 |---|---|---|
-| Price confirmed within `MAX_ODDS_AGE_MIN` | 10 min | stale prices make phantom edges |
+| Price confirmed within `MAX_ODDS_AGE_MIN` | 10 min (TT Cup: 20) | stale prices make phantom edges |
 | Reference margin between 1.00 and `MAX_OVERROUND` | 1.12 | junk margins make a junk fair line |
 | At least `MIN_CONSENSUS_BOOKS` other books (unless a sharp book is present) | 3 (TT Cup: 2) | thin markets are noise |
 | `EV ≤ MAX_EV` | 15% | bigger "edges" are almost always reversed or mismatched data |
@@ -277,7 +279,7 @@ TT Cup.
 | `MIN_CONSENSUS_BOOKS` | `3` (TT Cup workflow: `2`) | other books needed for a consensus line (lower = more alerts, more noise) |
 | `MAX_OVERROUND` | `1.12` | books with a larger margin stay out of the fair line |
 | `MIN_ODDS` / `MAX_ODDS` | `1.10` / `5.00` | only alert prices in this range |
-| `MAX_ODDS_AGE_MIN` | `10` | ignore prices not confirmed this recently |
+| `MAX_ODDS_AGE_MIN` | `10` (TT Cup workflow: `20`) | ignore prices not confirmed this recently |
 | `MIN_MINUTES_TO_START` | `2` | skip matches about to start |
 | `BET_BOOKS` | *(empty = any)*; both workflows default to your sportsbooks | only recommend these books |
 | `MAX_ALERTS_PER_RUN` | `20` | flood guard; extra edges wait for the next run |
@@ -370,7 +372,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 187 tests, no network needed
+pytest                            # 188 tests, no network needed
 ```
 
 ---

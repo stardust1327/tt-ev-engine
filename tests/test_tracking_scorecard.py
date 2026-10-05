@@ -3,6 +3,7 @@
 import pytest
 
 from ev_engine.tracking.scorecard import (
+    SPLITS,
     PickStats,
     book_accuracy,
     build_scorecard,
@@ -14,6 +15,7 @@ from ev_engine.tracking.scorecard import (
     markdown,
     parse_prices,
     pick_stats,
+    split_stats,
 )
 
 from conftest import NOW
@@ -98,3 +100,10 @@ def test_report_renders():
     assert embed["url"].endswith("REPORT.md") and "3 matches waiting" in embed["footer"]["text"]
     text = markdown(card, title="Tracker")
     assert "## Verdict" in text and "| All time | 1 | 1-0 | +1.00u |" in text
+
+
+def test_results_split_by_price_age_in_order():
+    rows = [pick("won", 2.0, 1.9, 5.0, 1.0, price_age_min=age) for age in ("3.0", "8.5", "14.0", "19.9", "25.0", "")]
+    bands = split_stats(rows, SPLITS["By price age at alert"])
+    assert list(bands) == ["up to 5 min", "5-10 min", "10-20 min", "over 20 min", "unknown"]
+    assert bands["10-20 min"].bets == 2
