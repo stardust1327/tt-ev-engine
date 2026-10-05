@@ -212,6 +212,60 @@ def emit_annotation(level: str, title: str, message: str, secrets: tuple[str, ..
     print(f"::{level} title={_escape_command(title, prop=True)}::{_escape_command(message)}", flush=True)
 
 
+# Settings a user is likely to tune, by environment variable. Shown on every run so a
+# changed repository variable can be confirmed from the run page.
+_TUNABLES: dict[str, str] = {
+    "ev_threshold": "EV_THRESHOLD",
+    "strong_ev_threshold": "STRONG_EV_THRESHOLD",
+    "max_ev": "MAX_EV",
+    "devig_method": "DEVIG_METHOD",
+    "fair_line_mode": "FAIR_LINE_MODE",
+    "sharp_books": "SHARP_BOOKS",
+    "min_consensus_books": "MIN_CONSENSUS_BOOKS",
+    "max_overround": "MAX_OVERROUND",
+    "min_odds": "MIN_ODDS",
+    "max_odds": "MAX_ODDS",
+    "max_odds_age_min": "MAX_ODDS_AGE_MIN",
+    "min_minutes_to_start": "MIN_MINUTES_TO_START",
+    "max_alerts_per_run": "MAX_ALERTS_PER_RUN",
+    "realert_ev_delta": "REALERT_EV_DELTA",
+    "tt_leagues": "TT_LEAGUES",
+    "betsapi_league_ids": "BETSAPI_LEAGUE_IDS",
+    "betsapi_markets": "BETSAPI_MARKETS",
+    "betsapi_lookahead_min": "BETSAPI_LOOKAHEAD_MIN",
+    "odds_api_sports": "ODDS_API_SPORTS",
+    "odds_api_regions": "ODDS_API_REGIONS",
+    "odds_api_markets": "ODDS_API_MARKETS",
+    "odds_api_lookahead_min": "ODDS_API_LOOKAHEAD_MIN",
+}
+
+
+def _setting_text(value: object) -> str:
+    if isinstance(value, tuple):
+        return ",".join(value) or "(empty)"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
+
+
+def settings_summary(settings: Settings) -> str:
+    """'Picks from: DraftKings, FanDuel | Changed from the defaults: MIN_CONSENSUS_BOOKS=2, ...'."""
+    defaults = Settings()
+    skip_prefix = []
+    if "betsapi_tt" not in settings.providers:
+        skip_prefix += ["tt_", "betsapi_"]
+    if "the_odds_api" not in settings.providers:
+        skip_prefix += ["odds_api_"]
+    changed = [
+        f"{env}={_setting_text(getattr(settings, field))}"
+        for field, env in _TUNABLES.items()
+        if not field.startswith(tuple(skip_prefix)) and getattr(settings, field) != getattr(defaults, field)
+    ]
+    picks = ", ".join(settings.bet_books) if settings.bet_books else "any book (BET_BOOKS not set)"
+    rest = "Changed from the defaults: " + ", ".join(changed) if changed else "Everything else at the defaults"
+    return f"Picks from: {picks} | {rest}"
+
+
 def _annotate(report: RunReport, settings: Settings) -> None:
     mode = "logged (dry run)" if settings.dry_run else "posted"
     parts = [f"{report.events_scanned} events scanned, {len(report.edges)} +EV edges, "
@@ -230,6 +284,7 @@ def _annotate(report: RunReport, settings: Settings) -> None:
     coverage = coverage_summary(report, settings)
     if coverage:
         emit_annotation("notice", "Book coverage", coverage, settings.secrets())
+    emit_annotation("notice", "Settings", settings_summary(settings), settings.secrets())
     for error in report.errors[:8]:
         emit_annotation("error", "EV scan error", error, settings.secrets())
 
@@ -310,6 +365,7 @@ def _log_summary(report: RunReport, settings: Settings) -> None:
     coverage = coverage_summary(report, settings)
     if coverage:
         log.info("Book coverage: %s", coverage)
+    log.info("Settings: %s", settings_summary(settings))
     for error in report.errors:
         log.error("Run error: %s", error)
 

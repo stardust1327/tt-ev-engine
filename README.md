@@ -51,7 +51,7 @@ ev_engine/
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               139 tests, all HTTP mocked (pytest + responses)
+tests/               143 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -167,7 +167,8 @@ After that the schedule takes over: scheduled runs always post for real. Every r
 **EV scan** annotation on its run page (events, edges, alerts, API calls and credits left), and any error shows
 there too, so you rarely need to open the logs. A second **Book coverage** annotation shows how many books
 priced each match and which ones, the first thing to check if matches are skipped with
-"No fair line (too few books)". While a workflow's secrets are missing it doesn't fail: it
+"No fair line (too few books)". A **Settings** annotation lists which books picks come from and every
+setting you changed with a repository variable, so you can confirm a change took effect. While a workflow's secrets are missing it doesn't fail: it
 finishes green with a **Scanner idle** warning naming the missing secret.
 
 ### 6. Pin the league (recommended)
@@ -282,7 +283,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 139 tests, no network needed
+pytest                            # 143 tests, no network needed
 ```
 
 ---
