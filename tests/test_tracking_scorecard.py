@@ -107,3 +107,11 @@ def test_results_split_by_price_age_in_order():
     bands = split_stats(rows, SPLITS["By price age at alert"])
     assert list(bands) == ["up to 5 min", "5-10 min", "10-20 min", "over 20 min", "unknown"]
     assert bands["10-20 min"].bets == 2
+
+
+def test_results_split_by_fair_line_source():
+    rows = [pick("won", 2.0, 1.9, 5.0, 1.0, reference="Bet365 no-vig line (power devig)"),
+            pick("lost", 2.0, 1.9, 5.0, -1.0, reference="Bet365 no-vig line (power devig)"),
+            pick("won", 2.0, 1.9, 5.0, 1.0, reference="Consensus of 2 books (median, power devig)")]
+    groups = split_stats(rows, SPLITS["By fair line"])
+    assert {name: s.bets for name, s in groups.items()} == {"Bet365 alone": 2, "consensus of books": 1}

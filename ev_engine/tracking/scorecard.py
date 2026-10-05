@@ -111,8 +111,17 @@ def _age_band(row: dict[str, str]) -> str:
     return "2 5-10 min" if age <= 10 else ("3 10-20 min" if age <= 20 else "4 over 20 min")
 
 
+def _fair_line_source(row: dict[str, str]) -> str:
+    """'Bet365 no-vig line (power devig)' -> 'Bet365 alone'; 'Consensus of 2 books ...' -> 'consensus'."""
+    reference = row.get("reference", "")
+    if " no-vig line" in reference:
+        return f"{reference.split(' no-vig line')[0]} alone"
+    return "consensus of books" if reference.startswith("Consensus") else (reference or "unknown")
+
+
 SPLITS: dict[str, Callable[[dict[str, str]], str]] = {
     "By book": lambda row: row.get("book") or "?",
+    "By fair line": _fair_line_source,
     "By EV at alert": _ev_band,
     "By price age at alert": _age_band,
     "By market": lambda row: MARKET_LABELS.get(row.get("market", ""), row.get("market", "?")),

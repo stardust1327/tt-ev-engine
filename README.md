@@ -69,7 +69,7 @@ ev_engine/
     grading.py       results, profit, closing line, CLV  (pure, unit-tested)
     scorecard.py     report card: ROI + luck band, CLV verdict, calibration, book accuracy
     tracker.py       log alerts → grade finished matches → REPORT.md + weekly Discord card
-tests/               188 tests, all HTTP mocked (pytest + responses)
+tests/               189 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -108,6 +108,13 @@ DraftKings (every match), Bet365 (most) and FonBet (about half). The TT Cup work
 mean), so a match is priced when all three have fresh prices. `MIN_CONSENSUS_BOOKS=1` also prices matches with
 only two fresh books, against that one other book: more alerts, but a single stale book is enough to fake an
 edge. The **Book coverage** annotation on each run shows how many books each match had.
+
+Most scans have only Bet365 and DraftKings fresh, which is too few for that consensus, so the TT Cup workflow
+also sets `SHARP_BOOKS=Bet365`: DraftKings is priced against **Bet365's no-vig line** whenever Bet365 has a
+fresh price, and Bet365 itself is still priced against a consensus of two other books. That rests each
+DraftKings alert on one book's line, so the accuracy tracker reports these alerts separately (**By fair line**)
+and its book-accuracy line shows whether Bet365's closing line deserves the trust. `FAIR_LINE_MODE=consensus`
+switches it off.
 
 Two things about this feed shape what you'll see. BetsAPI re-checks DraftKings' TT prices in bulk, far less
 often than Bet365's or FonBet's: across 38 scans in October 2026, DraftKings' prices were 10 minutes old or less
@@ -275,7 +282,7 @@ TT Cup.
 | `MAX_EV` | `0.15` | EV above this is treated as bad data |
 | `DEVIG_METHOD` | `power` | `multiplicative`, `additive`, `power`, `shin` |
 | `FAIR_LINE_MODE` | `auto` | `auto`, `sharp`, `consensus` |
-| `SHARP_BOOKS` | *(empty)* | priority list of sharp books, e.g. `pinnacle` |
+| `SHARP_BOOKS` | *(empty)*; TT Cup workflow: `Bet365` | priority list of books whose no-vig line is the fair line, e.g. `pinnacle` |
 | `MIN_CONSENSUS_BOOKS` | `3` (TT Cup workflow: `2`) | other books needed for a consensus line (lower = more alerts, more noise) |
 | `MAX_OVERROUND` | `1.12` | books with a larger margin stay out of the fair line |
 | `MIN_ODDS` / `MAX_ODDS` | `1.10` / `5.00` | only alert prices in this range |
@@ -372,7 +379,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 188 tests, no network needed
+pytest                            # 189 tests, no network needed
 ```
 
 ---

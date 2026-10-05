@@ -138,7 +138,11 @@ jobs:
           MAX_EV: ${{ vars.MAX_EV }}
           DEVIG_METHOD: ${{ vars.DEVIG_METHOD }}
           FAIR_LINE_MODE: ${{ vars.FAIR_LINE_MODE }}
-          SHARP_BOOKS: ${{ vars.SHARP_BOOKS }}
+          # BetsAPI often has only Bet365 and DraftKings fresh for a TT Cup match, too few for a
+          # consensus. So DraftKings is priced against Bet365's no-vig line whenever Bet365 is fresh;
+          # Bet365 itself still needs a consensus of 2 other books. The tracker's "By fair line"
+          # table shows how these alerts do. FAIR_LINE_MODE=consensus switches it off.
+          SHARP_BOOKS: ${{ vars.SHARP_BOOKS || 'Bet365' }}
           # BetsAPI carries ~3 books for TT Cup (DraftKings, Bet365, FonBet), so the engine-wide
           # default of 3 OTHER books can never be met here. 2 = price each book against the
           # average of the other two. 1 = more alerts, but one stale book can fake an edge.
