@@ -1,4 +1,5 @@
-# TT Cup table-tennis scanner (BetsAPI) - every 15 minutes on a GitHub-hosted runner.
+# TT Cup table-tennis scanner (BetsAPI) - every 15 minutes on a GitHub-hosted runner,
+# started by scan-timer.yml (live) or by hand from the Actions tab.
 # MLB / NFL run separately in us-sports-scanner.yml.
 #
 # One-time setup (repo → Settings → Secrets and variables → Actions):
@@ -11,10 +12,7 @@
 name: TT Cup EV Scanner
 
 on:
-  schedule:
-    # Every 15 min at :07 :22 :37 :52 UTC. GitHub warns that schedules at the top of
-    # the hour are the most likely to be delayed or dropped, so we stay off :00.
-    - cron: "7,22,37,52 * * * *"
+  # No schedule here: scan-timer.yml starts this every 15 minutes with dry_run=false.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -42,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
-      # Scheduled runs post for real; manual runs follow the inputs.
+      # Timer runs pass dry_run=false and post for real; manual runs follow the inputs.
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
       INSPECT_ODDS: ${{ github.event_name == 'workflow_dispatch' && inputs.inspect_odds || false }}

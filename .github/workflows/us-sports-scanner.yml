@@ -1,4 +1,5 @@
-# MLB / NFL scanner (The Odds API) - every 30 minutes on a GitHub-hosted runner.
+# MLB / NFL scanner (The Odds API) - every 30 minutes on a GitHub-hosted runner,
+# started by scan-timer.yml (live; US_SCAN_EVERY_MIN changes the pace) or by hand.
 #
 # One-time setup (repo → Settings → Secrets and variables → Actions):
 #   Secrets   THE_ODDS_API_KEY
@@ -9,16 +10,15 @@
 #             US_EV_THRESHOLD, US_MAX_ODDS, US_SHARP_BOOKS (default: pinnacle),
 #             ODDS_API_SPORTS / ODDS_API_REGIONS / ODDS_API_MARKETS
 #
-# Cost: each call costs (markets x regions) credits per sport. Defaults (h2h x us,eu,
-# MLB + NFL) are 4 credits a run, about 5,800 credits a month at every 30 minutes.
-# Sports with no games listed cost nothing. Edit the cron below to change the cadence.
+# Cost: each call costs (markets x regions) credits per sport, and up to 10 named books
+# (ODDS_API_BOOKMAKERS) count as one region. Defaults (h2h, 8 books, MLB + NFL) are
+# 2 credits a run, about 2,900 a month at every 30 minutes. Sports with no games listed
+# cost nothing.
 
 name: MLB-NFL EV Scanner
 
 on:
-  schedule:
-    # Every 30 min at :12 and :42 UTC (off the busy top of the hour).
-    - cron: "12,42 * * * *"
+  # No schedule here: scan-timer.yml starts this every 30 minutes with dry_run=false.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
+      # Timer runs pass dry_run=false and post for real; manual runs follow the inputs.
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
       INSPECT_ODDS: ${{ github.event_name == 'workflow_dispatch' && inputs.inspect_odds || false }}

@@ -1,0 +1,18 @@
+# Backup for the outside timer: GitHub's own (best-effort) schedule runs the same tick as
+# scan-timer.yml. If cron-job.org already started a scanner recently, the tick does nothing.
+#
+# This is the only scheduled workflow, so it is the one GitHub may auto-disable after 60
+# days without commits - which only stops the backup, never the outside timer.
+
+name: Scan Timer (backup)
+
+on:
+  schedule:
+    - cron: "3,18,33,48 * * * *"   # off the busy top of the hour
+
+permissions:
+  actions: write
+
+jobs:
+  tick:
+    uses: ./.github/workflows/scan-timer.yml

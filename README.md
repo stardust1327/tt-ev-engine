@@ -2,7 +2,8 @@
 
 A headless Python engine that pulls upcoming **TT Cup** table-tennis odds from **BetsAPI**, strips out the
 bookmaker margin to estimate each player's true win probability, flags prices with positive expected value,
-and posts them to **Discord** as rich embeds. It runs every 15 minutes on **GitHub Actions** with no server.
+and posts them to **Discord** as rich embeds. It runs every 15 minutes on **GitHub Actions** with no server,
+started by a free outside timer because GitHub's own schedule skips runs when it is busy.
 
 **MLB and NFL** run through **The Odds API** in a second workflow (every 30 minutes, priced against Pinnacle),
 with an optional Discord channel of their own.
@@ -20,8 +21,12 @@ Fair line from: Consensus of 3 books (median, power devig)
 
 ```mermaid
 flowchart LR
-  cron1["TT Cup workflow<br/>every 15 min"] --> cli["python -m ev_engine"]
-  cron2["MLB-NFL workflow<br/>every 30 min"] --> cli
+  ext["cron-job.org<br/>every 15 min"] --> timer["Scan Timer workflow<br/>starts what is due"]
+  backup["GitHub schedule<br/>(backup)"] -.-> timer
+  timer --> cron1["TT Cup workflow<br/>every 15 min"]
+  timer --> cron2["MLB-NFL workflow<br/>every 30 min"]
+  cron1 --> cli["python -m ev_engine"]
+  cron2 --> cli
   cache[("Actions cache<br/>alert state")] <--> cli
   cli --> p1["BetsAPI provider<br/>TT Cup"]
   cli --> p2["The Odds API provider<br/>MLB / NFL"]
@@ -36,8 +41,10 @@ flowchart LR
 
 ```
 .github/workflows/
-  ev-scanner.yml         TT Cup: schedule, secrets → env, alert-state cache
-  us-sports-scanner.yml  MLB / NFL: same engine, its own schedule, cache and webhook
+  scan-timer.yml         pressed every 15 min by cron-job.org; starts the scanners that are due
+  scan-timer-backup.yml  the same tick on GitHub's own schedule, in case the outside timer stops
+  ev-scanner.yml         TT Cup: secrets → env, alert-state cache
+  us-sports-scanner.yml  MLB / NFL: same engine, its own cache and webhook
 ev_engine/
   config.py          every setting is an env var; secrets only via os.getenv
   models.py          provider-agnostic data model
@@ -163,7 +170,7 @@ Any variable you don't set falls back to the defaults in `ev_engine/config.py`.
    Each of the next 3 matches becomes an annotation listing every bookmaker's prices, when each was posted and
    when the API last checked it. Nothing is posted to Discord.
 
-After that the schedule takes over: scheduled runs always post for real. Every run also leaves a one-line
+After that the timer takes over (step 7): timer runs always post for real. Every run also leaves a one-line
 **EV scan** annotation on its run page (events, edges, alerts, API calls and credits left), and any error shows
 there too, so you rarely need to open the logs. A second **Book coverage** annotation shows how many books
 priced each match and which ones, the first thing to check if matches are skipped with
@@ -174,6 +181,26 @@ finishes green with a **Scanner idle** warning naming the missing secret.
 ### 6. Pin the league (recommended)
 The first runs log a line like `matched leagues TT Cup [22742]. Tip: set BETSAPI_LEAGUE_IDS=22742`.
 Setting that variable skips the sport-wide fixture scan and saves API calls.
+
+### 7. Start the outside timer (recommended)
+GitHub treats `schedule:` as best effort: on this project's first full day only 14 of about 68 TT Cup scans
+ran, with gaps of up to five hours. So the scanners have no schedule of their own. Instead the **Scan Timer**
+workflow starts whichever scanner is due (TT Cup every 15 minutes, MLB/NFL every 30), and a free
+[cron-job.org](https://cron-job.org) job presses its "Run workflow" button every 15 minutes:
+
+1. Create a fine-grained token at <https://github.com/settings/personal-access-tokens/new>: repository access
+   *Only select repositories* → this repo; repository permission **Actions: Read and write**; nothing else.
+   It can start and cancel this repo's workflow runs, but can't read your secrets or change code.
+2. On cron-job.org, create a job that runs every 15 minutes:
+   - URL `https://api.github.com/repos/<owner>/<repo>/actions/workflows/scan-timer.yml/dispatches`
+   - Advanced → method `POST`, headers `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`,
+     `Content-Type: application/json`, body `{"ref":"main"}`
+   - Turn on the failure email, then **Test run**: GitHub answers `204 No Content`.
+
+Until the job exists, `scan-timer-backup.yml` runs the same tick on GitHub's schedule, and it keeps doing so
+as a backup. Each tick checks when each scanner last ran, so the backup and the timer never double up.
+`TT_SCAN_EVERY_MIN` / `US_SCAN_EVERY_MIN` (multiples of 15) change the pace, e.g. `US_SCAN_EVERY_MIN=60`
+halves the Odds API credits.
 
 ---
 
@@ -235,13 +262,12 @@ only match across books when the number is identical.
   `X-RateLimit-Reset-After`; up to 10 embeds and 6,000 characters per message; a 404 (deleted webhook) stops
   delivery and fails the run.
 - **GitHub Actions minutes**: free for public repositories. A private repository on GitHub Free includes 2,000
-  minutes a month, and every run bills at least one minute, so the two schedules (about 4,300 runs a month)
-  go well over. Keep the repo public (secrets stay encrypted), slow the crons, or pay for the overage.
-- **Schedule caveats**: scheduled runs can start late or be dropped when GitHub is busy, especially at the top of
-  the hour, which is why the cron uses `:07 :22 :37 :52`. TT Cup matches are short and prices move fast; if the
-  delays cost you edges, run the same `python -m ev_engine` from an always-on box with `cron`. In public
-  repositories GitHub disables scheduled workflows after 60 days without repository activity; re-enable from the
-  Actions tab.
+  minutes a month, and every run bills at least one minute, so the timer ticks and scans (several thousand
+  short runs a month) go well over. Keep the repo public (secrets stay encrypted) or pay for the overage.
+- **Timing**: GitHub's own schedule runs late or drops runs when it is busy, which is why an outside timer
+  starts the scans (step 7). In public repositories GitHub disables *scheduled* workflows after 60 days without
+  a commit; only the backup is scheduled, so that never stops the outside timer (re-enable the backup from the
+  Actions tab if it happens). If the timer's token expires, cron-job.org emails you and the backup carries on.
 
 **De-duplication.** Each runner is a fresh machine, so each workflow restores its alert state from the Actions
 cache before the scan and saves it afterwards (TT Cup and MLB/NFL keep separate state). A pick alerts once, and
@@ -256,18 +282,18 @@ emails you), `2` configuration error.
 ## MLB / NFL
 
 `.github/workflows/us-sports-scanner.yml` runs the same engine against The Odds API every 30 minutes
-(`:12` and `:42`), looking up to 3 days ahead so NFL games show up from midweek.
+(every second Scan Timer tick), looking up to 3 days ahead so NFL games show up from midweek.
 
 1. Add the `THE_ODDS_API_KEY` secret (and `DISCORD_WEBHOOK_URL_US` for a separate channel).
 2. Optional variables: `US_BET_BOOKS` = the US books you can bet at (the workflow defaults to DraftKings,
-   FanDuel, BetMGM, Caesars, Hard Rock (Arizona) and Bally Bet), `ODDS_API_BOOKMAKERS` = the books to download
+   FanDuel, BetMGM, Caesars, Hard Rock and Bally Bet), `ODDS_API_BOOKMAKERS` = the books to download
    (defaults to those plus Pinnacle; keys are listed on The Odds API's bookmakers page), `US_EV_THRESHOLD`,
    `ODDS_API_MARKETS = h2h,spreads,totals` (3× the credits). Caesars is only returned on paid plans.
 3. Run **MLB-NFL EV Scanner** with **Dry run** ticked to see the first scan.
 
 The fair line is Pinnacle's no-vig price whenever Pinnacle lists the game (`US_SHARP_BOOKS` changes this),
-otherwise a consensus of the other downloaded books. To change the cadence, edit the cron at
-the top of the workflow file.
+otherwise a consensus of the other downloaded books. To change the cadence, set `US_SCAN_EVERY_MIN`
+(a multiple of 15).
 
 **Another data source**: subclass `OddsProvider` in `ev_engine/providers/`, return normalized `Event`s, and add
 the class to `REGISTRY` in `providers/__init__.py`. The analyzer, notifier and state need no changes.

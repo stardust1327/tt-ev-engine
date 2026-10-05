@@ -1,0 +1,72 @@
+# Scan Timer - starts the scanners on a reliable clock.
+#
+# GitHub runs `schedule:` triggers late, or drops them, when it is busy (on this project's
+# first full day only 14 of ~68 TT Cup scans ran). So a free outside timer (cron-job.org)
+# presses this workflow's "Run workflow" button every 15 minutes through GitHub's API, and
+# this job starts whichever scanner is due. scan-timer-backup.yml runs the same job on
+# GitHub's own schedule in case the outside timer stops; the "due" check keeps the two from
+# doubling up, so each scanner still runs at most once per interval.
+#
+# cron-job.org job (every 15 minutes):
+#   POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/scan-timer.yml/dispatches
+#   Authorization: Bearer <fine-grained token: this repo only, "Actions: Read and write">
+#   Accept: application/vnd.github+json
+#   body {"ref":"main"}                      -> GitHub answers 204 No Content
+#
+# This workflow has no schedule of its own, so GitHub never auto-disables it for
+# inactivity (it does that to scheduled workflows after 60 days without commits).
+
+name: Scan Timer
+
+on:
+  workflow_dispatch:   # pressed by the outside timer
+  workflow_call:       # reused by scan-timer-backup.yml
+
+permissions:
+  actions: write       # read recent runs, start the scanner workflows
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    concurrency:
+      group: scan-timer
+      cancel-in-progress: false
+    steps:
+      - name: Start the scanners that are due
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TRIGGER: ${{ github.event_name }}
+          # Minutes between scans. The timer ticks every 15, so use multiples of 15.
+          TT_EVERY_MIN: ${{ vars.TT_SCAN_EVERY_MIN || '15' }}
+          US_EVERY_MIN: ${{ vars.US_SCAN_EVERY_MIN || '30' }}
+        run: |
+          # due <workflow file> <minutes>: true when that scanner's newest run started at
+          # least <minutes> ago, minus 3 minutes of slack for the timer's own jitter.
+          due() {
+            last=$(gh run list -R "$REPO" -w "$1" -L 1 --json createdAt -q '.[0].createdAt // ""')
+            if [ -z "$last" ]; then echo "$1: no runs yet"; return 0; fi
+            age=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 60 ))
+            echo "$1: last run started $age min ago (every $2 min)"
+            [ "$age" -ge $(( $2 - 3 )) ]
+          }
+          started=""; failed=""
+          start() {  # start <workflow file> <label>
+            if gh workflow run "$1" -R "$REPO" --ref main -f dry_run=false; then
+              started="$started $2"
+            else
+              failed="$failed $2"
+            fi
+          }
+          if due ev-scanner.yml "$TT_EVERY_MIN"; then start ev-scanner.yml TT-Cup; fi
+          if due us-sports-scanner.yml "$US_EVERY_MIN"; then start us-sports-scanner.yml MLB-NFL; fi
+          if [ -n "$started" ]; then
+            echo "::notice title=Scan timer::Started:$started (trigger: $TRIGGER)"
+          elif [ -z "$failed" ]; then
+            echo "::notice title=Scan timer::Nothing due - both scanners ran recently (trigger: $TRIGGER)"
+          fi
+          if [ -n "$failed" ]; then
+            echo "::error title=Scan timer::Could not start:$failed"
+            exit 1
+          fi
