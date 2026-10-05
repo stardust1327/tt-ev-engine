@@ -13,6 +13,7 @@ Prices that keep beating the close are real edges; results only confirm it much 
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from dataclasses import dataclass, field
 
 from .. import quant
@@ -77,8 +78,9 @@ class ClosingLine:
     market: str
     line: float | None
     names: tuple[str, ...]                                  # outcome names; names[0] is "side A"
-    prices: dict[str, tuple[float, ...]] = field(default_factory=dict)  # book -> prices, `names` order
-    no_vig: dict[str, dict[str, float]] = field(default_factory=dict)   # sane-margin books only
+    prices: dict[str, tuple[float, ...]] = field(default_factory=dict)  # trusted books -> prices, `names` order
+    no_vig: dict[str, dict[str, float]] = field(default_factory=dict)   # trusted books with a sane margin
+    all_prices: dict[str, tuple[float, ...]] = field(default_factory=dict)  # every book, trusted or not
 
     def fair(self, exclude: str | None = None) -> tuple[dict[str, float] | None, list[str]]:
         """Consensus fair probabilities without `exclude`'s own prices, and the books used."""
@@ -88,14 +90,21 @@ class ClosingLine:
         return consensus([self.no_vig[b] for b in books], self.names), books
 
     def price_at(self, book: str, outcome: str) -> float | None:
-        for name, prices in self.prices.items():
+        for name, prices in self.all_prices.items():
             if book_key(name) == book_key(book) and outcome in self.names:
                 return prices[self.names.index(outcome)]
         return None
 
 
-def closing_lines(markets: list[BookMarket], devig_method: str, max_overround: float) -> list[ClosingLine]:
-    """Group closing BookMarkets by market line, devigging each book with a sane margin."""
+def closing_lines(markets: list[BookMarket], devig_method: str, max_overround: float,
+                  trusted: Collection[str] | None = None) -> list[ClosingLine]:
+    """Group closing BookMarkets by market line, devigging each trusted book with a sane margin.
+
+    trusted: the books whose prices were fresh at the last scan before the start. A book BetsAPI
+    stopped refreshing still has a "closing" price - often its opening one, hours old - so only
+    books the scan itself would have used count toward the closing fair line. None = trust all.
+    """
+    keys = None if trusted is None else {book_key(b) for b in trusted}
     groups: dict[tuple, ClosingLine] = {}
     for bm in markets:
         prices = tuple(o.price for o in bm.outcomes)
@@ -106,6 +115,9 @@ def closing_lines(markets: list[BookMarket], devig_method: str, max_overround: f
             cl = groups[bm.signature] = ClosingLine(bm.market, bm.line, tuple(o.name for o in bm.outcomes))
         by_name = {o.name: o.price for o in bm.outcomes}
         ordered = tuple(by_name[n] for n in cl.names)
+        cl.all_prices[bm.bookmaker] = ordered
+        if keys is not None and book_key(bm.bookmaker) not in keys:
+            continue  # stale at the last scan: shown nowhere, used for nothing but its own CLV price
         cl.prices[bm.bookmaker] = ordered
         if not 1.0 - _MARGIN_TOLERANCE <= quant.overround(ordered) <= max_overround:
             continue  # junk margin: shown in prices, kept out of the fair line (as in the analyzer)

@@ -82,6 +82,14 @@ def find_edges(event: Event, settings: Settings, now: datetime, report: RunRepor
     return edges
 
 
+def is_usable(bm: BookMarket, settings: Settings, now: datetime) -> bool:
+    """True if this book's prices could inform a fair line right now: fresh, valid, sane margin."""
+    if _price_problem(bm, settings, now) is not None:
+        return False
+    margin = quant.overround([o.price for o in bm.outcomes])
+    return 1.0 - _MARGIN_TOLERANCE <= margin <= settings.max_overround
+
+
 def _price_problem(bm: BookMarket, settings: Settings, now: datetime) -> tuple[str, str] | None:
     """(category, reason) if this book's prices can't be trusted right now, else None."""
     if len(bm.outcomes) < 2:

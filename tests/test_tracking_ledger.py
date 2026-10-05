@@ -67,3 +67,15 @@ def test_report_file_only_rewritten_when_it_changes(tmp_path):
     ledger = Ledger.load(tmp_path)
     assert ledger.write_report("# Report\n") is not None
     assert ledger.write_report("# Report\n") is None
+
+
+def test_watch_keeps_the_latest_scans_usable_books(tmp_path):
+    ledger = Ledger.load(tmp_path)
+    ev = event(market("Bet365", 1.9, 1.9))
+    ledger.watch(ev, ["Bet365", "DraftKings"])
+    ledger.save()
+    ledger.watch(ev, ["Bet365"])                 # DraftKings went stale in a later scan
+    assert ledger.changed and ledger.pending[match_key("betsapi_tt", "9001")]["books"] == ["Bet365"]
+    ledger.save()
+    ledger.watch(ev)                             # an alert's own watch() doesn't erase the list
+    assert not ledger.changed

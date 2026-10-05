@@ -144,3 +144,23 @@ def test_a_tracker_crash_never_fails_the_scan(tmp_path, ledger, monkeypatch):
         scan_mocks(rsps)
         assert run(make_settings(tmp_path, ledger_dir=ledger), now=NOW, sleep=lambda _s: None) == 0
     assert picks(ledger)[0]["status"] == "pending"  # the alert itself was still logged
+
+
+def test_books_stale_at_the_last_scan_stay_out_of_the_closing_line(tmp_path, ledger):
+    settings = make_settings(tmp_path, ledger_dir=ledger, min_consensus_books=2)
+    with responses.RequestsMock() as rsps:
+        rsps.add(responses.GET, UPCOMING, json=upcoming(fixture("e1", 25)))
+        rsps.add(responses.GET, SUMMARY, json=summary(
+            Bet365=book_odds("1.900", "1.900"), BWin=book_odds("1.870", "1.930", checked_ago=3600, added_ago=3600),
+            Betway=book_odds("1.930", "1.870"), Unibet=book_odds("1.700", "2.250")))
+        rsps.add(responses.POST, WEBHOOK, status=204)
+        assert run(settings, now=NOW, sleep=lambda _s: None) == 0
+    assert json.loads((ledger / "state" / "pending.json").read_text())["matches"]["betsapi_tt:e1"]["books"] == [
+        "Bet365", "Betway", "Unibet"]
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        settle_mocks(rsps)
+        assert run(settings, now=NOW + timedelta(hours=2), sleep=lambda _s: None) == 0
+    [row] = [r for r in picks(ledger) if r["book"] == "Unibet"]
+    assert row["close_books"] == "Bet365+Betway"                      # BWin was stale before the start
+    [line] = list(csv.DictReader((ledger / "lines" / "2026-10" / "2026-10-02.csv").open(encoding="utf-8")))
+    assert line["n_books"] == "3" and "BWin" not in line["prices"]

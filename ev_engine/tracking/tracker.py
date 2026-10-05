@@ -23,6 +23,7 @@ from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 
+from ..analyzer import is_usable
 from ..config import REPORT_DAYS, Settings
 from ..http_client import ApiError, BudgetExhausted, RateLimitError
 from ..models import Edge, Event, MatchResult
@@ -77,7 +78,8 @@ class Tracker:
 
     def watch(self, events: Iterable[Event]) -> None:
         for event in events:
-            self.ledger.watch(event)
+            books = sorted({bm.bookmaker for bm in event.markets if is_usable(bm, self.settings, self.now)})
+            self.ledger.watch(event, books)
 
     # -- 3 --------------------------------------------------------------------------------
     def settle(self, providers: Iterable[OddsProvider]) -> None:
@@ -148,7 +150,10 @@ class Tracker:
                 self.calls += 1
                 markets, sources = provider.closing_markets(event)
                 self.sources.update(sources)
-                lines = closing_lines(markets, self.settings.devig_method, self.settings.max_overround)
+                # Only books that were fresh at the last scan count; no record of that = none do.
+                trusted = match.get("books") if isinstance(match.get("books"), list) else []
+                lines = closing_lines(markets, self.settings.devig_method, self.settings.max_overround,
+                                      trusted=trusted)
             except (RateLimitError, BudgetExhausted) as exc:
                 self.notes.append(f"stopped early: {exc}")
                 if not self._overdue(match):

@@ -90,3 +90,15 @@ def test_calibration_rows_record_side_a_and_its_result():
     assert row["side"] == HOME and row["result"] == 1 and row["n_books"] == 2
     assert 0.6 < row["fair"] < 0.65
     assert row["prices"]["Bet365"] == (1.50, 2.70)
+
+
+def test_only_books_fresh_before_the_start_count_at_the_close():
+    markets = [ml("Bet365", 3.00, 1.363), ml("BWin", 3.20, 1.31),
+               ml("CashPoint", 1.67, 1.95), ml("DraftKings", 2.90, 1.40)]  # CashPoint: hours-old opener
+    [cl] = closing_lines(markets, "power", 1.12, trusted=["Bet365", "BWin"])
+    assert set(cl.prices) == set(cl.no_vig) == {"Bet365", "BWin"}
+    cv = closing_value(MONEYLINE, None, HOME, "DraftKings", 3.30, [cl])
+    assert set(cv.close_books) == {"Bet365", "BWin"}
+    assert cv.close_price == 2.90                       # the alerted book's own close is still shown
+    [nothing] = closing_lines(markets, "power", 1.12, trusted=[])
+    assert nothing.fair() == (None, []) and calibration_rows([nothing], RESULT, HOME, AWAY) == []

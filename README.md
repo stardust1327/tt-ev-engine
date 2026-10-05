@@ -69,7 +69,7 @@ ev_engine/
     grading.py       results, profit, closing line, CLV  (pure, unit-tested)
     scorecard.py     report card: ROI + luck band, CLV verdict, calibration, book accuracy
     tracker.py       log alerts → grade finished matches → REPORT.md + weekly Discord card
-tests/               189 tests, all HTTP mocked (pytest + responses)
+tests/               192 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -237,7 +237,9 @@ sooner, for every TT Cup alert and for every match the scanner priced:
 | **Profit / ROI** | Every alert as a 1-unit bet at the alerted price, with the luck band at that sample size | thousands of alerts |
 
 CLV is `price × p_close − 1`, where `p_close` is the closing fair line built exactly like the alert's (the
-*other* books' kickoff prices, no-vig with `DEVIG_METHOD`, median). Each scan logs its alerts and its matches;
+*other* books' kickoff prices, no-vig with `DEVIG_METHOD`, median). Only books whose prices were fresh at the last
+scan before the start count: a book BetsAPI stopped refreshing still reports a "closing" price, often its
+hours-old opener. Each scan logs its alerts and its matches;
 about `SETTLE_AFTER_MIN` (40) minutes after a match starts, a later scan fetches the final score and every
 book's closing price and grades it. Retired, walkover and cancelled matches void their picks.
 
@@ -379,7 +381,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 189 tests, no network needed
+pytest                            # 192 tests, no network needed
 ```
 
 ---

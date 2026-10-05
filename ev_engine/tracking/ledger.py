@@ -173,13 +173,21 @@ class Ledger:
                 return
 
     # -- matches waiting for a result ---------------------------------------------------
-    def watch(self, event: Event) -> bool:
-        """Remember a match so it gets graded after it ends. True if it was new."""
+    def watch(self, event: Event, books: list[str] | None = None) -> bool:
+        """Remember a match so it gets graded after it ends. True if it was new.
+
+        books: the books with fresh, usable prices in this scan. The latest scan before the
+        start wins; only those books count toward the match's closing fair line.
+        """
         key = match_key(event.provider, event.event_id)
         start = int(event.start_time.timestamp())
         if key in self.pending:
-            if self.pending[key].get("start") != start:  # rescheduled: wait for the new start time
-                self.pending[key]["start"] = start
+            entry = self.pending[key]
+            if entry.get("start") != start:  # rescheduled: wait for the new start time
+                entry["start"] = start
+                self._dirty_state = True
+            if books is not None and entry.get("books") != books:
+                entry["books"] = books
                 self._dirty_state = True
             return False
         self.pending[key] = {
@@ -190,6 +198,8 @@ class Ledger:
             "home": event.home,
             "away": event.away,
         }
+        if books is not None:
+            self.pending[key]["books"] = books
         self._dirty_state = True
         return True
 
