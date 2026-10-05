@@ -287,8 +287,20 @@ class Scorecard:
         return calibration_verdict(self.buckets, self.matches)
 
 
+def first_alerts(picks: list[dict[str, str]]) -> list[dict[str, str]]:
+    """One row per pick: its first alert. A re-alert (the same player in the same match, posted again
+    because its EV rose) is the same bet, so counting it again would inflate the record and the CLV."""
+    first: dict[tuple, dict[str, str]] = {}
+    for row in sorted(picks, key=lambda r: r.get("sent_at", "")):
+        key = tuple(row.get(k, "") for k in ("provider", "event_id", "market", "line", "outcome"))
+        first.setdefault(key, row)
+    return list(first.values())
+
+
 def build_scorecard(picks: list[dict[str, str]], lines: list[dict[str, str]], *, now: datetime,
                     devig_method: str, max_overround: float, pending: int = 0, since: str = "") -> Scorecard:
+    recent = sorted(picks, key=lambda r: r.get("sent_at", ""), reverse=True)[:20]
+    picks = first_alerts(picks)
     week_start = now - timedelta(days=7)
     week_rows = [r for r in picks if (start := parse_iso(r.get("start", ""))) and start >= week_start]
     graded = [r for r in picks if r.get("status") in GRADED]
@@ -303,7 +315,7 @@ def build_scorecard(picks: list[dict[str, str]], lines: list[dict[str, str]], *,
         matches=matches,
         books=books,
         books_n=books_n,
-        recent=sorted(picks, key=lambda r: r.get("sent_at", ""), reverse=True)[:20],
+        recent=recent,
         pending=pending,
         since=since,
     )
@@ -329,7 +341,7 @@ def _books_line(card: Scorecard) -> str | None:
 
 def discord_embed(card: Scorecard, *, title: str, url: str = "") -> dict:
     s = card.all_time
-    lines = ["**Alerts** (1 unit each, at the alerted price)",
+    lines = ["**Alerts** (1 unit per pick, at its first alert's price)",
              _alerts_line("Last 7 days", card.week),
              _alerts_line("All time", s)]
     if s.bets:
@@ -378,7 +390,9 @@ def markdown(card: Scorecard, *, title: str) -> str:
         out.append(f"- **Books:** {books}")
     header = ["| | Bets | W-L | Profit | ROI | Luck (±1 SD) | Expected from EV | CLV |",
               "|---|---|---|---|---|---|---|---|"]
-    out += ["", "## Alerts", "", "Every Discord alert counts as a 1-unit bet at the alerted price.", "", *header,
+    out += ["", "## Alerts", "",
+            "Each pick counts once, as a 1-unit bet at its first alert's price "
+            "(re-alerts are listed below but not counted again).", "", *header,
             _stats_row("Last 7 days", card.week), _stats_row("All time", card.all_time)]
     for name, groups in card.splits.items():
         if len(groups) < 2 and name != "By book":
@@ -406,7 +420,8 @@ def markdown(card: Scorecard, *, title: str) -> str:
             clv = num(r.get("clv_pct"))
             prof = num(r.get("profit"))
             out.append(
-                f"| {sent} | {_cell(r.get('pick', ''))} ({_cell(r.get('home', ''))} vs {_cell(r.get('away', ''))}) | "
+                f"| {sent} | {_cell(r.get('pick', ''))}{' (re-alert)' if r.get('alert_n', '1') != '1' else ''} "
+                f"({_cell(r.get('home', ''))} vs {_cell(r.get('away', ''))}) | "
                 f"{_cell(r.get('book', ''))} | {r.get('price', '')} | {r.get('fair_odds', '')} | "
                 f"{'' if ev is None else f'{ev:+.1f}%'} | {_cell(r.get('status', ''))} {_cell(r.get('score', ''))} | "
                 f"{'' if prof is None else _units(prof)} | {'' if clv is None else f'{clv:+.1f}%'} |"

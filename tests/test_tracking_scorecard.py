@@ -115,3 +115,14 @@ def test_results_split_by_fair_line_source():
             pick("won", 2.0, 1.9, 5.0, 1.0, reference="Consensus of 2 books (median, power devig)")]
     groups = split_stats(rows, SPLITS["By fair line"])
     assert {name: s.bets for name, s in groups.items()} == {"Bet365 alone": 2, "consensus of books": 1}
+
+
+def test_a_re_alerted_pick_counts_once_at_its_first_alert():
+    base = {"provider": "betsapi_tt", "event_id": "e1", "market": "moneyline", "line": "", "outcome": "David Sykora"}
+    rows = [pick("won", 1.57, 1.511, 3.91, 0.57, -1.53, sent_at="2026-10-05T12:30:00Z", alert_n="1", **base),
+            pick("won", 1.57, 1.414, 11.04, 0.57, -1.53, sent_at="2026-10-05T12:45:00Z", alert_n="2", **base),
+            pick("won", 1.60, 1.414, 13.17, 0.60, 0.35, sent_at="2026-10-05T14:15:00Z", alert_n="3", **base)]
+    card = build_scorecard(rows, [], now=NOW, devig_method="power", max_overround=1.12)
+    assert card.all_time.bets == 1 and card.all_time.profit == pytest.approx(0.57)
+    assert card.all_time.clv == [pytest.approx(-0.0153)] and len(card.recent) == 3
+    assert "(re-alert)" in markdown(card, title="T")

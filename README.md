@@ -236,7 +236,7 @@ sooner, for every TT Cup alert and for every match the scanner priced:
 | **Closing line value (CLV)** | Did the alerted price beat the fair line at kickoff? The best early sign that an edge is real | ~20-50 alerts |
 | **Calibration** | When the fair line says 60%, does that player win ~60%? (every priced match, alert or not) | ~200 matches (a few days) |
 | **Book accuracy** | Whose closing line is closest to the results (a candidate for `SHARP_BOOKS`) | ~200 matches |
-| **Profit / ROI** | Every alert as a 1-unit bet at the alerted price, with the luck band at that sample size | thousands of alerts |
+| **Profit / ROI** | Each pick as a 1-unit bet at its first alert's price (re-alerts aren't counted twice), with the luck band at that sample size | thousands of alerts |
 
 CLV is `price × p_close − 1`, where `p_close` is the closing fair line built exactly like the alert's (the
 *other* books' kickoff prices, no-vig with `DEVIG_METHOD`, median). Only books whose prices were fresh at the last
