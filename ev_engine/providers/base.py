@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import ClassVar
 
@@ -12,7 +13,7 @@ import requests
 
 from ..config import Settings
 from ..http_client import ApiClient
-from ..models import MARKET_LABELS, Event, RunReport, format_line
+from ..models import MARKET_LABELS, BookMarket, Event, MatchResult, RunReport, format_line
 from ..quant import overround
 
 
@@ -55,6 +56,23 @@ class OddsProvider(ABC):
 
     def usage(self) -> str:
         return self.client.usage()
+
+    # -- accuracy tracker (optional) ----------------------------------------------------
+    # A provider that implements both of these can have its alerts graded and its fair
+    # line calibrated (ev_engine/tracking). The others are simply skipped by the tracker.
+    supports_grading: ClassVar[bool] = False
+    results_per_call: ClassVar[int] = 1
+
+    def fetch_results(self, event_ids: Sequence[str]) -> dict[str, MatchResult]:
+        """Final status and score for up to `results_per_call` events, keyed by event id (one HTTP call)."""
+        raise NotImplementedError
+
+    def closing_markets(self, event: Event) -> tuple[list[BookMarket], Counter]:
+        """Each book's last pre-match prices for a finished event (one HTTP call).
+
+        Returns the markets and a count of where the closing prices came from (diagnostics).
+        """
+        raise NotImplementedError
 
     def inspect(self, now: datetime, matches: int = 3) -> list[tuple[str, str]]:
         """Diagnostics: (heading, one line per book) for the next few matches, as parsed.

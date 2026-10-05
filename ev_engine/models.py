@@ -142,6 +142,40 @@ class Edge:
 
 
 @dataclass(frozen=True)
+class MatchResult:
+    """How an event finished, as its provider reports it - used to grade picks.
+
+    status:  "ended" (a winner is known), "void" (cancelled, walkover, retired, ...: bets are
+             refunded) or "pending" (not finished, or no final score yet).
+    home_score / away_score: games won in table tennis.
+    periods: points per game as (home, away), needed for handicaps and totals.
+    """
+
+    event_id: str
+    status: str
+    home_score: int | None = None
+    away_score: int | None = None
+    periods: tuple[tuple[int, int], ...] = ()
+    detail: str = ""  # the provider's own status, e.g. "Retired"
+
+    @property
+    def home_points(self) -> int:
+        return sum(h for h, _ in self.periods)
+
+    @property
+    def away_points(self) -> int:
+        return sum(a for _, a in self.periods)
+
+    @property
+    def score(self) -> str:
+        """'3-1 (11-7 9-11 11-5 11-8)'."""
+        if self.home_score is None or self.away_score is None:
+            return self.detail
+        games = " ".join(f"{h}-{a}" for h, a in self.periods)
+        return f"{self.home_score}-{self.away_score}" + (f" ({games})" if games else "")
+
+
+@dataclass(frozen=True)
 class Skip:
     category: str
     detail: str

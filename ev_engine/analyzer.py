@@ -31,6 +31,7 @@ import logging
 import math
 import statistics
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -213,9 +214,18 @@ def _fair_line(
             f"(MIN_CONSENSUS_BOOKS={settings.min_consensus_books})"
         )
     names = [o.name for o in target.outcomes]
-    medians = {n: statistics.median(no_vig[id(bm)][n] for bm in others) for n in names}
-    total = sum(medians.values())
     return FairLine(
-        {n: v / total for n, v in medians.items()},
+        consensus([no_vig[id(bm)] for bm in others], names),
         f"Consensus of {len(others)} books (median, {method} devig)",
     )
+
+
+def consensus(no_vig: Sequence[dict[str, float]], names: Sequence[str]) -> dict[str, float]:
+    """Per-outcome median of several books' no-vig probabilities, renormalized to sum to 1.
+
+    The one definition of "the market's fair line", shared by the alerts and by the
+    accuracy tracker's closing line, so both measure the same thing.
+    """
+    medians = {n: statistics.median(probs[n] for probs in no_vig) for n in names}
+    total = sum(medians.values())
+    return {n: v / total for n, v in medians.items()}

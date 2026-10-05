@@ -11,3 +11,6 @@ __pycache__/
 .venv/
 venv/
 .ruff_cache/
+
+# accuracy tracker ledger (a separate private repo, checked out here by the workflow)
+ledger/

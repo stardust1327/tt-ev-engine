@@ -203,6 +203,18 @@ class DiscordNotifier:
             delivered.extend(edge for edge, _ in batch)
         return DeliveryResult(delivered)
 
+    def post_embed(self, embed: dict) -> str | None:
+        """Post one standalone embed (the tracker's report card). Returns an error message, or None."""
+        payload = {"username": self.username, "allowed_mentions": {"parse": []}, "embeds": [embed]}
+        if self.dry_run:
+            log.info("[dry run] Discord message:\n%s", json.dumps(payload, indent=2, ensure_ascii=False))
+            return None
+        try:
+            self._post(payload)
+        except DiscordError as exc:
+            return str(exc)
+        return None
+
     # -- transport --------------------------------------------------------------------
     def _wait_for_bucket(self) -> None:
         wait = self._not_before - self._monotonic()

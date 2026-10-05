@@ -25,6 +25,7 @@ from .models import MONEYLINE, SKIP_LABELS, Edge, Event, RunReport
 from .notifier import DiscordError, DiscordNotifier
 from .providers import build_providers
 from .state import AlertState
+from .tracking import Tracker
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ def run(
 
     state = AlertState.load(settings.state_path, ttl_hours=settings.state_ttl_hours,
                             realert_ev_delta=settings.realert_ev_delta)
+    scanned: list[Event] = []
+    delivered: list[Edge] = []
 
     # 1) Fetch + analyze. A failing provider never stops the others.
     for provider in providers:
@@ -69,6 +72,7 @@ def run(
         finally:
             report.api_usage[provider.label] = provider.usage()
 
+        scanned.extend(events)
         report.events_scanned += len(events)
         for event in events:
             try:
@@ -102,7 +106,8 @@ def run(
                 log.error("Discord delivery failed: %s", result.error)
                 report.errors.append(f"Discord: {result.error}")
             if not settings.dry_run:
-                for edge in result.delivered:
+                delivered = list(result.delivered)
+                for edge in delivered:
                     state.record(edge, now)
     else:
         log.info("No new +EV edges this run.")
@@ -113,10 +118,52 @@ def run(
     except OSError as exc:
         log.warning("Could not save alert state (%s); the next run may repeat alerts.", exc)
 
+    # 4) Accuracy tracker: last, so nothing it does can delay or block an alert.
+    tracker_line = _track(settings, now, providers, scanned, delivered, session=session, sleep=sleep)
+    for provider in providers:
+        report.api_usage[provider.label] = provider.usage()  # now including the tracker's calls
+
     _log_summary(report, settings)
-    write_step_summary(report, settings, path=summary_path)
+    write_step_summary(report, settings, path=summary_path, tracker=tracker_line)
     _annotate(report, settings)
+    if tracker_line:
+        emit_annotation("notice", "Tracker", tracker_line, settings.secrets())
     return 1 if report.errors else 0
+
+
+def _track(
+    settings: Settings,
+    now: datetime,
+    providers: list,
+    scanned: list[Event],
+    delivered: list[Edge],
+    *,
+    session: requests.Session | None,
+    sleep: Callable[[float], None],
+) -> str | None:
+    """Log this run's alerts, grade finished matches, refresh the report card. Never raises."""
+    try:
+        tracker = Tracker.open(settings, now)
+    except Exception as exc:
+        log.exception("Tracker failed to start")
+        return f"tracker error: {type(exc).__name__}: {exc}"
+    if tracker is None:
+        return None
+    try:
+        tracker.log_alerts(delivered)
+        tracker.watch(scanned)
+        tracker.settle(providers)
+    except Exception as exc:  # a tracker bug must not cost the alerts; keep what was logged
+        log.exception("Tracker failed while grading")
+        tracker.notes.append(f"tracker error: {type(exc).__name__}: {exc}")
+    try:
+        notifier = DiscordNotifier.from_settings(settings, session=session, sleep=sleep)
+        written = tracker.finish(notifier.post_embed)
+        log.info("Tracker: %s (%d ledger file(s) written)", tracker.summary(), len(written))
+    except Exception as exc:
+        log.exception("Tracker failed while saving")
+        tracker.notes.append(f"tracker error: {type(exc).__name__}: {exc}")
+    return tracker.summary()
 
 
 def send_test_alert(
@@ -375,7 +422,8 @@ def _cell(text: object) -> str:
     return str(text).replace("|", "\\|").replace("\n", " ")
 
 
-def write_step_summary(report: RunReport, settings: Settings, path: str | None = None) -> None:
+def write_step_summary(report: RunReport, settings: Settings, path: str | None = None,
+                       tracker: str | None = None) -> None:
     """Append a Markdown run report to the GitHub Actions job summary (no-op elsewhere)."""
     path = path or os.getenv("GITHUB_STEP_SUMMARY")
     if not path:
@@ -427,6 +475,8 @@ def write_step_summary(report: RunReport, settings: Settings, path: str | None =
         lines += ["", "</details>"]
     if report.errors:
         lines += ["", "**Errors**", ""] + [f"- {_cell(err)}" for err in report.errors]
+    if tracker:
+        lines += ["", "**Accuracy tracker**", "", _cell(tracker)]
 
     try:
         with open(path, "a", encoding="utf-8") as fh:

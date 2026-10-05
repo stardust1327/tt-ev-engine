@@ -3,6 +3,8 @@
 Endpoints (docs: https://betsapi.com/docs/)
   GET /v3/events/upcoming?sport_id=92[&league_id=][&page=]   upcoming fixtures, 50 per page
   GET /v2/event/odds/summary?event_id=                       per-bookmaker odds snapshots
+  GET /v1/event/view?event_id=1,2,3                          final scores, up to 10 events per call
+                                                             (accuracy tracker only)
 
 Odds-summary market keys for table tennis (sport_id 92)
   92_1  match winner  -> home_od / away_od
@@ -25,7 +27,8 @@ from __future__ import annotations
 import logging
 import math
 import time
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -33,7 +36,17 @@ import requests
 
 from ..config import ConfigError, Settings
 from ..http_client import ApiClient, ApiError, BudgetExhausted, RateLimitError, RateLimitPolicy
-from ..models import MARKET_LABELS, MONEYLINE, SPREAD, TOTAL, BookMarket, Event, Outcome, RunReport
+from ..models import (
+    MARKET_LABELS,
+    MONEYLINE,
+    SPREAD,
+    TOTAL,
+    BookMarket,
+    Event,
+    MatchResult,
+    Outcome,
+    RunReport,
+)
 from .base import OddsProvider
 
 log = logging.getLogger(__name__)
@@ -41,6 +54,15 @@ log = logging.getLogger(__name__)
 SPORT_ID = "92"  # table tennis
 MARKET_TYPES = {"92_1": MONEYLINE, "92_2": SPREAD, "92_3": TOTAL}
 SNAPSHOTS = ("end", "kickoff", "start")  # odds-summary snapshots; we take the newest pre-match one
+# time_status codes (BetsAPI glossary). 3 = Ended; these mean the match won't be played out,
+# so bets on it are refunded: postponed, cancelled, walkover, interrupted, abandoned,
+# retired, suspended, decided by FA, disqualified, removed.
+ENDED_STATUS = "3"
+VOID_STATUSES = {
+    "4": "Postponed", "5": "Cancelled", "6": "Walkover", "7": "Interrupted", "8": "Abandoned",
+    "9": "Retired", "10": "Suspended", "11": "Decided by FA", "12": "Disqualified", "99": "Removed",
+}
+RESULTS_PER_CALL = 10  # /v1/event/view takes up to 10 comma-separated event ids
 # Error codes (BetsAPI glossary, R-Errors) that retrying won't fix -> fail the run loudly.
 FATAL_ERRORS = frozenset(
     {"AUTHORIZE_FAILED", "PERMISSION_DENIED", "PARAM_REQUIRED", "PARAM_INVALID", "METHOD_NOT_ALLOWED"}
@@ -80,7 +102,7 @@ def parse_line(raw: Any) -> float | None:
 def _to_int(raw: Any) -> int | None:
     try:
         return int(float(raw))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -89,6 +111,60 @@ def _ago(ts: int, now: datetime) -> str:
     if minutes < 0:
         return f"{-minutes:.0f}m in the future"
     return f"{minutes:.0f}m ago" if minutes < 120 else f"{minutes / 60:.1f}h ago"
+
+
+def _closing_record(snapshots: dict, key: str, start_ts: float) -> tuple[dict | None, str]:
+    """(record, snapshot name) holding a book's closing price for one market, or (None, "")."""
+    def record_in(name: str) -> dict | None:
+        snapshot = snapshots.get(name)
+        record = snapshot.get(key) if isinstance(snapshot, dict) else None
+        return record if isinstance(record, dict) and _to_int(record.get("add_time")) else None
+
+    if (kickoff := record_in("kickoff")) is not None:
+        return kickoff, "kickoff"
+    end = record_in("end")
+    if end is not None:
+        pre_match = _to_int(end.get("add_time")) <= start_ts and end.get("ss") in (None, "")
+        return (end, "last pre-match") if pre_match else (None, "")
+    start = record_in("start")  # no later record at all: the opening price never changed
+    return (start, "opening (unchanged)") if start is not None else (None, "")
+
+
+def _games(raw: Any) -> tuple[tuple[int, int], ...]:
+    """{"1": {"home": "11", "away": "7"}, ...} -> ((11, 7), ...) in game order; () if unreadable."""
+    if not isinstance(raw, dict):
+        return ()
+    games = []
+    for number in sorted(raw, key=lambda k: _to_int(k) or 0):
+        game = raw[number]
+        home = _to_int(game.get("home")) if isinstance(game, dict) else None
+        away = _to_int(game.get("away")) if isinstance(game, dict) else None
+        if _to_int(number) is None or home is None or away is None:
+            return ()
+        games.append((home, away))
+    return tuple(games)
+
+
+def _parse_result(raw: Any) -> MatchResult | None:
+    """One /v1/event/view result -> MatchResult (games won from "ss", points per game from "scores")."""
+    if not isinstance(raw, dict) or not raw.get("id"):
+        return None
+    event_id = str(raw["id"])
+    status = str(raw.get("time_status", ""))
+    if status in VOID_STATUSES:
+        return MatchResult(event_id, "void", detail=VOID_STATUSES[status])
+    games = _games(raw.get("scores"))
+    home = away = None
+    ss = str(raw.get("ss") or "")
+    if "-" in ss:
+        left, _, right = ss.partition("-")
+        home, away = _to_int(left.strip()), _to_int(right.strip())
+    if (home is None or away is None) and games:  # no "ss": count the games each player won
+        home = sum(1 for h, a in games if h > a)
+        away = sum(1 for h, a in games if a > h)
+    if status != ENDED_STATUS or home is None or away is None or home == away:
+        return MatchResult(event_id, "pending", detail=f"time_status {status or '?'}")
+    return MatchResult(event_id, "ended", home, away, games, detail="Ended")
 
 
 def _price_key(record: dict) -> tuple:
@@ -108,6 +184,8 @@ def _name(obj: Any) -> str | None:
 class BetsApiTableTennisProvider(OddsProvider):
     name = "betsapi_tt"
     label = "BetsAPI"
+    supports_grading = True
+    results_per_call = RESULTS_PER_CALL
 
     @classmethod
     def from_settings(
@@ -194,6 +272,49 @@ class BetsApiTableTennisProvider(OddsProvider):
                 )
             )
         return events
+
+    # -- accuracy tracker ---------------------------------------------------------------
+    def fetch_results(self, event_ids: Sequence[str]) -> dict[str, MatchResult]:
+        """Final status and score for up to 10 events in one /v1/event/view call."""
+        ids = [str(i) for i in event_ids][:RESULTS_PER_CALL]
+        if not ids:
+            return {}
+        data = self._call("/v1/event/view", event_id=",".join(ids))
+        results = data.get("results")
+        parsed = (_parse_result(raw) for raw in (results if isinstance(results, list) else []))
+        return {r.event_id: r for r in parsed if r is not None and r.event_id in ids}
+
+    def closing_markets(self, event: Event) -> tuple[list[BookMarket], Counter]:
+        """Each book's closing prices for a finished match, from the same odds summary the scan reads.
+
+        The closing price is the "kickoff" snapshot (the price when the match went live). Books
+        without one fall back to their newest record if it was posted before the start with no
+        live score - i.e. that price was still up at kickoff - and are left out otherwise rather
+        than graded against an opening price.
+        """
+        data = self._call("/v2/event/odds/summary", event_id=event.event_id)
+        results = data.get("results")
+        fx = {"home": event.home, "away": event.away, "start": event.start_time}
+        start_ts = event.start_time.timestamp()
+        markets: list[BookMarket] = []
+        sources: Counter = Counter()
+        for book, payload in (results.items() if isinstance(results, dict) else ()):
+            if not isinstance(payload, dict) or not isinstance(payload.get("odds"), dict):
+                continue
+            reversed_dir = str(payload.get("matching_dir", "1")).strip() == "-1"
+            for key in self.settings.betsapi_markets:
+                record, source = _closing_record(payload["odds"], key, start_ts)
+                if record is None:
+                    continue
+                try:
+                    bm = self._book_market(str(book), MARKET_TYPES[key], record, fx, reversed_dir,
+                                           _to_int(record.get("add_time")))
+                except ValueError:
+                    continue  # suspended / missing prices at the close
+                if bm is not None:
+                    markets.append(bm)
+                    sources[source] += 1
+        return markets, sources
 
     def inspect(self, now: datetime, matches: int = 3) -> list[tuple[str, str]]:
         """Diagnostics: BetsAPI's raw odds summary for the next few fixtures, one line per bookmaker.

@@ -8,6 +8,10 @@ started by a free outside timer because GitHub's own schedule skips runs when it
 **MLB and NFL** run through **The Odds API** in a second workflow (every 30 minutes, priced against Pinnacle),
 with an optional Discord channel of their own.
 
+An optional **accuracy tracker** logs every TT Cup alert and every priced match to a private repo, grades them
+after the match (result, profit, closing line value) and keeps a report card that says whether the edges are
+real. See [Tracking accuracy](#tracking-accuracy).
+
 ```
 🔥 +5.2% EV · Kovalenko M. vs Shevchenko O.
 Bet Shevchenko O. @ 2.33 on Unibet
@@ -37,13 +41,15 @@ flowchart LR
   dd -- yes --> dc["Discord webhook<br/>rich embeds"]
   dd -- "no (already alerted)" --> skip["suppressed"]
   an --> sum["Run summary + annotations<br/>edges · skips · API usage"]
+  dc --> trk["Accuracy tracker<br/>log → grade after the match → report card"]
+  trk <--> ledger[("Private ledger repo<br/>picks · lines · REPORT.md")]
 ```
 
 ```
 .github/workflows/
   scan-timer.yml         pressed every 15 min by cron-job.org; starts the scanners that are due
   scan-timer-backup.yml  the same tick on GitHub's own schedule, in case the outside timer stops
-  ev-scanner.yml         TT Cup: secrets → env, alert-state cache
+  ev-scanner.yml         TT Cup: secrets → env, alert-state cache, ledger checkout + commit
   us-sports-scanner.yml  MLB / NFL: same engine, its own cache and webhook
 ev_engine/
   config.py          every setting is an env var; secrets only via os.getenv
@@ -53,12 +59,17 @@ ev_engine/
   analyzer.py        fair line per market, quality gates, best-price selection
   providers/
     base.py          the adapter contract
-    betsapi.py       TT Cup via BetsAPI (/v3/events/upcoming + /v2/event/odds/summary)
+    betsapi.py       TT Cup via BetsAPI (/v3/events/upcoming + /v2/event/odds/summary; /v1/event/view to grade)
     the_odds_api.py  US leagues via The Odds API v4
   notifier.py        Discord embeds, batching, rate-limit handling
   state.py           de-duplication across runs
   runner.py          one scan end to end + GitHub step summary
-tests/               146 tests, all HTTP mocked (pytest + responses)
+  tracking/
+    ledger.py        the ledger files: picks, calibration lines, pending matches
+    grading.py       results, profit, closing line, CLV  (pure, unit-tested)
+    scorecard.py     report card: ROI + luck band, CLV verdict, calibration, book accuracy
+    tracker.py       log alerts → grade finished matches → REPORT.md + weekly Discord card
+tests/               187 tests, all HTTP mocked (pytest + responses)
 ```
 
 ---
@@ -204,6 +215,48 @@ halves the Odds API credits.
 
 ---
 
+## Tracking accuracy
+
+Results alone take thousands of bets to separate skill from luck. The tracker measures the things that answer
+sooner, for every TT Cup alert and for every match the scanner priced:
+
+| What | Answers | Readable after |
+|---|---|---|
+| **Closing line value (CLV)** | Did the alerted price beat the fair line at kickoff? The best early sign that an edge is real | ~20-50 alerts |
+| **Calibration** | When the fair line says 60%, does that player win ~60%? (every priced match, alert or not) | ~200 matches (a few days) |
+| **Book accuracy** | Whose closing line is closest to the results (a candidate for `SHARP_BOOKS`) | ~200 matches |
+| **Profit / ROI** | Every alert as a 1-unit bet at the alerted price, with the luck band at that sample size | thousands of alerts |
+
+CLV is `price × p_close − 1`, where `p_close` is the closing fair line built exactly like the alert's (the
+*other* books' kickoff prices, no-vig with `DEVIG_METHOD`, median). Each scan logs its alerts and its matches;
+about `SETTLE_AFTER_MIN` (40) minutes after a match starts, a later scan fetches the final score and every
+book's closing price and grades it. Retired, walkover and cancelled matches void their picks.
+
+### Setup (5 minutes)
+1. Create a **private** repo named `tt-ev-ledger` at <https://github.com/new>, with **Add a README file** ticked
+   (an empty repo can't be checked out). Another name works too: set the `LEDGER_REPO` variable to `owner/name`.
+2. Create a fine-grained token at <https://github.com/settings/personal-access-tokens/new>: repository access
+   *Only select repositories* → `tt-ev-ledger`; repository permission **Contents: Read and write**; nothing else.
+3. In this repo add it as the secret **`LEDGER_TOKEN`**.
+
+The next scan starts tracking. Until the secret exists the scanner works as before and each run shows a
+"Tracker off" note; if the token expires, runs show "Tracker off" again and alerts carry on.
+
+### What you get
+- **`REPORT.md`** in the ledger repo: the live report card (verdicts, results by book / EV / price age,
+  calibration table, recent alerts), refreshed after every scan.
+- A **weekly report card** in your Discord channel (Mondays 16:00 UTC = 9am Phoenix; `REPORT_DAY` /
+  `REPORT_HOUR_UTC`). To get one now: Actions → TT Cup EV Scanner → Run workflow, untick *Dry run*, tick
+  *Post the accuracy tracker's report card*.
+- **CSV files** you can open in any spreadsheet: `picks/YYYY-MM.csv` (one row per alert, graded in place) and
+  `lines/YYYY-MM/YYYY-MM-DD.csv` (every graded match with each book's closing prices).
+- A **Tracker** note on every run (what was logged and graded, BetsAPI calls used).
+
+Cost: about one extra BetsAPI call per finished match (plus one per 10 matches for the scores), capped at
+`TRACKER_MAX_CALLS` per run. Dry runs, test alerts and diagnostics are never logged.
+
+---
+
 ## Configuration
 
 Every setting is an environment variable (a repository variable in Actions, or a line in `.env` locally).
@@ -241,6 +294,10 @@ TT Cup.
 | `ODDS_API_BOOKMAKERS` | *(empty)*; MLB-NFL workflow: Pinnacle + your books | named books instead of regions; every 10 books cost one region |
 | `ODDS_API_LOOKAHEAD_MIN` / `ODDS_API_MIN_REMAINING` | `1440` (workflow: `4320`) / `50` | window and monthly-credit floor |
 | `DRY_RUN` / `LOG_LEVEL` | `false` / `INFO` | |
+| `LEDGER_REPO` | `<owner>/tt-ev-ledger` | private repo for the accuracy tracker (needs the `LEDGER_TOKEN` secret) |
+| `SETTLE_AFTER_MIN` / `SETTLE_GIVE_UP_HOURS` | `40` / `12` | when to first look for a result, and when to stop waiting |
+| `TRACKER_MAX_CALLS` | `40` | BetsAPI calls per run for grading |
+| `REPORT_DAY` / `REPORT_HOUR_UTC` | `mon` / `16` | weekly report card in Discord (`REPORT_DAY=off` to stop it) |
 
 Handicap and total markets (`92_2`, `92_3`) are off by default: books mix set and point handicaps, and lines
 only match across books when the number is identical.
@@ -313,7 +370,7 @@ cp .env.example .env              # fill in your token + webhook; .env is git-ig
 python -m ev_engine --test-alert  # one sample embed to Discord
 python -m ev_engine --dry-run     # full scan, payloads printed instead of posted
 python -m ev_engine --inspect     # raw odds for the next 3 matches (diagnostics)
-pytest                            # 146 tests, no network needed
+pytest                            # 187 tests, no network needed
 ```
 
 ---
@@ -321,6 +378,7 @@ pytest                            # 146 tests, no network needed
 ## Caveats
 
 A consensus fair line is an estimate. Thin markets, feeds that lag the books, and late lineup or table changes
-all create edges that aren't real, which is what the gates above are for. Track your results and closing-line
-value before staking real money. This is a tool, not financial advice; make sure sports betting is legal where
+all create edges that aren't real, which is what the gates above are for. Let the accuracy tracker show the
+alerts beating the closing line before staking real money; CLV is measured at the alerted price, so a price
+that was already gone when you clicked counts for less than it shows. This is a tool, not financial advice; make sure sports betting is legal where
 you are and that you follow each sportsbook's terms.

@@ -22,6 +22,7 @@ FAIR_LINE_MODES = ("auto", "sharp", "consensus")
 BETSAPI_MARKET_KEYS = ("92_1", "92_2", "92_3")  # table tennis: winner, handicap, total
 ODDS_API_MARKET_KEYS = ("h2h", "spreads", "totals")
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+REPORT_DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun", "off")  # weekday() order, then "off"
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -168,6 +169,18 @@ class Settings:
     odds_api_lookahead_min: int = 1440
     odds_api_min_remaining: int = 50                  # monthly credits floor
 
+    # --- accuracy tracker (ev_engine/tracking) --------------------------------------
+    # The workflow checks the private ledger repo out and points LEDGER_DIR at it. Unset
+    # (or not a directory) = tracker off; it never stops a scan either way.
+    ledger_dir: Path | None = None
+    ledger_url: str = ""               # link to the ledger repo, shown in the report card
+    settle_after_min: float = 40.0     # first try to grade a match this long after its start
+    settle_give_up_hours: float = 12.0  # stop waiting for a result after this long
+    tracker_max_calls: int = 40        # BetsAPI calls per run for grading (after the scan's own)
+    report_day: str = "mon"            # weekly report card day (UTC), or "off"
+    report_hour_utc: int = 16          # ...posted on the first run after this hour (16 UTC = 9am Phoenix)
+    report_now: bool = False           # post the report card on this run
+
     @classmethod
     def from_env(cls) -> Settings:
         """Build settings from environment variables, then validate them."""
@@ -216,6 +229,14 @@ class Settings:
             odds_api_markets=_list("ODDS_API_MARKETS", d.odds_api_markets),
             odds_api_lookahead_min=_int("ODDS_API_LOOKAHEAD_MIN", d.odds_api_lookahead_min, 5, 30 * 1440),
             odds_api_min_remaining=_int("ODDS_API_MIN_REMAINING", d.odds_api_min_remaining, 0, 10_000_000),
+            ledger_dir=Path(raw) if (raw := _raw("LEDGER_DIR")) else None,
+            ledger_url=_str("LEDGER_URL", d.ledger_url),
+            settle_after_min=_float("SETTLE_AFTER_MIN", d.settle_after_min, 5, 24 * 60),
+            settle_give_up_hours=_float("SETTLE_GIVE_UP_HOURS", d.settle_give_up_hours, 1, 24 * 14),
+            tracker_max_calls=_int("TRACKER_MAX_CALLS", d.tracker_max_calls, 0, 10_000),
+            report_day=_str("REPORT_DAY", d.report_day).lower()[:3],
+            report_hour_utc=_int("REPORT_HOUR_UTC", d.report_hour_utc, 0, 23),
+            report_now=_bool("REPORT_NOW", d.report_now),
         )
         settings.validate()
         return settings
@@ -244,6 +265,8 @@ class Settings:
             raise ConfigError(f"ODDS_API_MARKETS must be a subset of {', '.join(ODDS_API_MARKET_KEYS)}")
         if not self.tt_leagues and not self.betsapi_league_ids:
             raise ConfigError("Set TT_LEAGUES (league-name filter) or BETSAPI_LEAGUE_IDS")
+        if self.report_day not in REPORT_DAYS:
+            raise ConfigError(f"REPORT_DAY must be one of {', '.join(REPORT_DAYS)}")
         if not (self.dry_run or self.inspect_odds) and not self.discord_webhook_url:
             raise ConfigError("DISCORD_WEBHOOK_URL is not set (or set DRY_RUN=true to run without Discord)")
         if self.discord_webhook_url and not _WEBHOOK_RE.match(self.discord_webhook_url):

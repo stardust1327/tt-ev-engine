@@ -4,6 +4,9 @@
 #
 # One-time setup (repo → Settings → Secrets and variables → Actions):
 #   Secrets   BETSAPI_TOKEN, DISCORD_WEBHOOK_URL
+#             LEDGER_TOKEN (optional) turns on the accuracy tracker: a fine-grained token with
+#             "Contents: Read and write" on a private ledger repo (default <owner>/tt-ev-ledger,
+#             or set the LEDGER_REPO variable). See README › Tracking accuracy.
 #   Variables optional overrides of the defaults in ev_engine/config.py,
 #             e.g. EV_THRESHOLD=0.03 or BET_BOOKS=Bet365,Betway
 # Unset variables expand to "" and the engine falls back to its defaults.
@@ -27,6 +30,10 @@ on:
         description: "Diagnostics: show the raw odds for the next 3 matches (no alerts)"
         type: boolean
         default: false
+      report_now:
+        description: "Post the accuracy tracker's report card to Discord now (needs dry run off)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,12 +51,16 @@ jobs:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       SEND_TEST_ALERT: ${{ github.event_name == 'workflow_dispatch' && inputs.test_alert || false }}
       INSPECT_ODDS: ${{ github.event_name == 'workflow_dispatch' && inputs.inspect_odds || false }}
+      REPORT_NOW: ${{ github.event_name == 'workflow_dispatch' && inputs.report_now || false }}
+      # Accuracy tracker ledger: a private repo, <owner>/tt-ev-ledger unless LEDGER_REPO says otherwise.
+      LEDGER_REPO: ${{ vars.LEDGER_REPO || format('{0}/tt-ev-ledger', github.repository_owner) }}
     steps:
       - name: Check secrets
         id: ready
         env:
           BETSAPI_TOKEN: ${{ secrets.BETSAPI_TOKEN }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          LEDGER_TOKEN: ${{ secrets.LEDGER_TOKEN }}
         run: |
           missing=""
           if [ "$SEND_TEST_ALERT" != "true" ] && [ -z "$BETSAPI_TOKEN" ]; then missing="$missing BETSAPI_TOKEN"; fi
@@ -59,6 +70,15 @@ jobs:
             echo "ready=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          # The tracker only follows real scans: dry runs, test alerts and diagnostics post nothing.
+          if [ "$DRY_RUN" = "true" ] || [ "$SEND_TEST_ALERT" = "true" ] || [ "$INSPECT_ODDS" = "true" ]; then
+            echo "ledger=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$LEDGER_TOKEN" ]; then
+            echo "::notice title=Tracker off::Add a LEDGER_TOKEN secret to track alert accuracy in $LEDGER_REPO (README › Tracking accuracy)."
+            echo "ledger=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ledger=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Check out code
@@ -85,6 +105,24 @@ jobs:
           key: ev-alert-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ev-alert-state-
+
+      # Accuracy tracker: check out the private ledger repo. If this fails, the scan still runs
+      # and alerts as usual; only the tracking is skipped (and flagged on the run page).
+      - name: Check out the ledger
+        id: ledger
+        if: steps.ready.outputs.ready == 'true' && steps.ready.outputs.ledger == 'true'
+        continue-on-error: true
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.LEDGER_REPO }}
+          token: ${{ secrets.LEDGER_TOKEN }}
+          path: ledger
+
+      - name: Flag a ledger problem
+        if: steps.ledger.outcome == 'failure'
+        run: >-
+          echo "::warning title=Tracker off::Could not check out $LEDGER_REPO. Check that the repo exists and is not
+          empty (create it with a README), and that LEDGER_TOKEN has Contents: Read and write on it and hasn't expired."
 
       - name: Scan for +EV edges
         if: steps.ready.outputs.ready == 'true'
@@ -119,7 +157,31 @@ jobs:
           BETSAPI_LOOKAHEAD_MIN: ${{ vars.BETSAPI_LOOKAHEAD_MIN }}
           DISCORD_USERNAME: ${{ vars.DISCORD_USERNAME || 'EV Engine · TT Cup' }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+          # --- accuracy tracker (on only when the ledger checked out) ---
+          LEDGER_DIR: ${{ steps.ledger.outcome == 'success' && 'ledger' || '' }}
+          LEDGER_URL: ${{ github.server_url }}/${{ env.LEDGER_REPO }}
+          SETTLE_AFTER_MIN: ${{ vars.SETTLE_AFTER_MIN }}
+          SETTLE_GIVE_UP_HOURS: ${{ vars.SETTLE_GIVE_UP_HOURS }}
+          TRACKER_MAX_CALLS: ${{ vars.TRACKER_MAX_CALLS }}
+          REPORT_DAY: ${{ vars.REPORT_DAY }}
+          REPORT_HOUR_UTC: ${{ vars.REPORT_HOUR_UTC }}
         run: python -m ev_engine
+
+      # Commit whatever the tracker wrote (new alerts, graded matches, REPORT.md). If the push
+      # fails, nothing is lost: the next run starts from the last saved ledger and redoes it.
+      - name: Save the ledger
+        if: always() && steps.ledger.outcome == 'success'
+        working-directory: ledger
+        run: |
+          git add -A
+          if git diff --cached --quiet; then echo "Ledger unchanged."; exit 0; fi
+          git -c user.name="tt-ev-engine" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Ledger update $(date -u '+%Y-%m-%d %H:%M') UTC"
+          for attempt in 1 2 3; do
+            if git push -q; then echo "Ledger saved."; exit 0; fi
+            git pull -q --rebase || break
+          done
+          echo "::warning title=Ledger not saved::Could not push to $LEDGER_REPO. Check that LEDGER_TOKEN still has Contents: Read and write (tokens expire). The next run redoes this one's grading."
 
       - name: Save alert state
         if: always() && steps.ready.outputs.ready == 'true'
